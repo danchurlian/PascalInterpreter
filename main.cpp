@@ -426,7 +426,7 @@ class Parser {
         std::unique_ptr<Lexer> lexer;
         std::shared_ptr<Token> currentToken; // should this be a raw pointer?
         void error(const std::string &message);
-        void eat(TokenType aTokenType, bool shouldDelete); // add bool shouldDelete?
+        void eat(TokenType aTokenType);
         std::unique_ptr<Node> program(); 
         std::shared_ptr<Token> program_name();
         std::unique_ptr<Node> block();
@@ -463,7 +463,7 @@ void Parser::print_tokens() {
 void Parser::error(const std::string &message) {
     throw std::runtime_error("Parser error: " +message);
 }
-void Parser::eat(TokenType aTokenType, bool shouldDelete) {
+void Parser::eat(TokenType aTokenType) {
     if (currentToken->tokenType != aTokenType) {
         std::string errormsg = "expected token \'" +tokenType_tostring(aTokenType)+ "\', got \'" +tokenType_tostring(currentToken->tokenType)+ "\' token";
         std::cout << currentToken << std::endl;
@@ -472,17 +472,17 @@ void Parser::eat(TokenType aTokenType, bool shouldDelete) {
     currentToken = lexer->get_next_token();
 }
 std::unique_ptr<Node> Parser::program() {
-    eat(TokenType::PROGRAM, true);
+    eat(TokenType::PROGRAM);
     std::shared_ptr<Token> name = program_name();
-    eat(TokenType::SEMI, true);
+    eat(TokenType::SEMI);
     std::unique_ptr<Node> blockNode = block();
-    eat(TokenType::DOT, true);
+    eat(TokenType::DOT);
     std::unique_ptr<Node> root = std::make_unique<ProgramNode>(name, std::move(blockNode));
     return root;
 }
 std::shared_ptr<Token> Parser::program_name() {
     std::shared_ptr<Token> name = currentToken;
-    eat(TokenType::VARIABLE, false);
+    eat(TokenType::VARIABLE);
     return name;
 }
 std::unique_ptr<Node> Parser::block() {
@@ -492,7 +492,7 @@ std::unique_ptr<Node> Parser::block() {
 }
 std::unique_ptr<Node> Parser::declarationRoot() {
     if (currentToken->tokenType == TokenType::VAR) {
-        eat(TokenType::VAR, true);
+        eat(TokenType::VAR);
         std::vector<std::unique_ptr<Node>> list = declarationList();
         return std::make_unique<DeclarationRoot>(list);
     }
@@ -504,15 +504,15 @@ std::vector<std::unique_ptr<Node>> Parser::declarationList() {
 
     while(currentToken->tokenType == TokenType::VARIABLE) {
         std::vector<std::unique_ptr<Node>> varListResult = varList();
-        eat(TokenType::COLON, true);
+        eat(TokenType::COLON);
         std::shared_ptr<Token> typeToken = currentToken;
         if (currentToken->tokenType == TokenType::INTEGER) {
-            eat(TokenType::INTEGER, false);
+            eat(TokenType::INTEGER);
         }
         else {
-            eat(TokenType::REAL, false);
+            eat(TokenType::REAL);
         }
-        eat(TokenType::SEMI, true);
+        eat(TokenType::SEMI);
 
         for (auto &varNode : varListResult) {
             std::unique_ptr<VarDeclaration> varDecNode = std::make_unique<VarDeclaration>(std::move(varNode), typeToken->tokenType);
@@ -525,20 +525,20 @@ std::vector<std::unique_ptr<Node>> Parser::declarationList() {
 std::vector<std::unique_ptr<Node>> Parser::varList() {
     std::vector<std::unique_ptr<Node>> list;
     list.push_back(std::make_unique<VariableNode>(currentToken));
-    eat(TokenType::VARIABLE, false);
+    eat(TokenType::VARIABLE);
     
     while(currentToken->tokenType == TokenType::COMMA) {
-        eat(TokenType::COMMA, true);
+        eat(TokenType::COMMA);
         list.push_back(std::make_unique<VariableNode>(currentToken));
-        eat(TokenType::VARIABLE, false);
+        eat(TokenType::VARIABLE);
     }
     return list;
 }
 std::unique_ptr<Node> Parser::compoundStatement() {
-    eat(TokenType::BEGIN, true);
+    eat(TokenType::BEGIN);
     std::vector<std::unique_ptr<Node>> list;
     list = std::move(statementList(list));
-    eat(TokenType::END, true);
+    eat(TokenType::END);
 
     return std::make_unique<CompoundStatement>(std::move(list));
 }
@@ -553,30 +553,28 @@ std::vector<std::unique_ptr<Node>> Parser::statementList(std::vector<std::unique
     }
     if (currentToken->tokenType == TokenType::BEGIN) {
         list.push_back(std::unique_ptr<Node>(compoundStatement()));
-        eat(TokenType::SEMI, true);
+        eat(TokenType::SEMI);
         return statementList(list);
     }
 
     std::unique_ptr<Node> statement = assignStatement();
     list.push_back(std::move(statement));
     if (currentToken->tokenType == TokenType::SEMI) {
-        eat(TokenType::SEMI, true);
+        eat(TokenType::SEMI);
     }
     // this->error("Statement list error: edge case reached");
     return statementList(list);
 }
 std::unique_ptr<Node> Parser::assignStatement() {
     std::shared_ptr<Token> variable = currentToken;
-    eat(TokenType::VARIABLE, false);
+    eat(TokenType::VARIABLE);
     std::unique_ptr<Node> variableNode = std::make_unique<VariableNode>(variable);
-    variable.reset();
 
     std::shared_ptr<Token> assign = currentToken;
-    eat(TokenType::ASSIGN, false);
+    eat(TokenType::ASSIGN);
 
     std::unique_ptr<Node> right = factor();
     std::unique_ptr<Node> newNode = std::make_unique<AssignStatement>(std::move(variableNode), assign, std::move(right));
-    assign.reset();
     return newNode;
 }
 std::unique_ptr<Node> Parser::emptyStatement() {
@@ -585,26 +583,26 @@ std::unique_ptr<Node> Parser::emptyStatement() {
 std::unique_ptr<Node> Parser::factor() {
     std::shared_ptr<Token> current = currentToken;
     if (current->tokenType == TokenType::INT) {
-        eat(TokenType::INT, false);
+        eat(TokenType::INT);
         return std::make_unique<NumberNode>(current); // passing raw pointer into NumberNode constructor, creating a new shared_ptr
     }
     if (current->tokenType == TokenType::VARIABLE) {
-        eat(TokenType::VARIABLE, false);
+        eat(TokenType::VARIABLE);
         return std::make_unique<VariableNode>(current);
     }
     if (current->tokenType == TokenType::ADD || current->tokenType == TokenType::SUB) {
         switch (current->tokenType) {
-            case TokenType::ADD: eat(TokenType::ADD, false); break;
-            case TokenType::SUB: eat(TokenType::SUB, false); break;
+            case TokenType::ADD: eat(TokenType::ADD); break;
+            case TokenType::SUB: eat(TokenType::SUB); break;
         }
         std::unique_ptr<Node> factorNode = factor();
         std::unique_ptr<Node> unaryOp = std::make_unique<UnaryOp>(current, std::move(factorNode));
         return unaryOp;
     }
     if (current->tokenType == TokenType::LPAREN) {
-        eat(TokenType::LPAREN, true);
+        eat(TokenType::LPAREN);
         std::unique_ptr<Node> exprRoot = expr();
-        eat(TokenType::RPAREN, true);
+        eat(TokenType::RPAREN);
         return exprRoot;
     }
     this->error("Found an invalid factor");
@@ -618,13 +616,13 @@ std::unique_ptr<Node> Parser::term() {
         std::shared_ptr<Token> op = currentToken;
         switch (op->tokenType) {
             case TokenType::MUL:
-                eat(TokenType::MUL, false);
+                eat(TokenType::MUL);
                 break;
             case TokenType::DIV:
-                eat(TokenType::DIV, false);
+                eat(TokenType::DIV);
                 break;
             default:
-                eat(TokenType::INT_DIV, false);
+                eat(TokenType::INT_DIV);
                 break;
         }
         std::unique_ptr<Node> right = factor();
@@ -640,10 +638,10 @@ std::unique_ptr<Node> Parser::expr() {
         std::shared_ptr<Token> op = currentToken;
         switch(op->tokenType) {
             case TokenType::ADD:
-                eat(TokenType::ADD, false);
+                eat(TokenType::ADD);
                 break;
             default:
-                eat(TokenType::SUB, false);
+                eat(TokenType::SUB);
                 break;
         }
         std::unique_ptr<Node> right = term();
