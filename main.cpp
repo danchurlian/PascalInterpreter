@@ -81,24 +81,56 @@ void Token::print() {
     std::cout << "Token: { TokenType: " << tokenType_tostring(tokenType) << " | Value: \"" << value << "\" }\n";   
 }
 
+// --------------------------------------------------------------
+
+class Node;
+class NumberNode;
+class BinaryOp;
+class UnaryOp;
+class VariableNode;
+class AssignStatement;
+class CompoundStatement;
+class EmptyStatement;
+class TypeNode;
+class VarDeclaration;
+class DeclarationRoot;
+class Block;
+class ProgramNode;
+
+// --------------------------------------------------------------
+
+class Visitor {
+    public:
+        Visitor() {};
+        virtual void visitNumberNode(NumberNode *node) {};
+        virtual void visitBinaryOp(BinaryOp *node) {};
+        virtual void visitUnaryOp(UnaryOp *node) {};
+        virtual void visitVariableNode(VariableNode *node) {};
+        virtual void visitCompoundStatement(CompoundStatement *node) {};
+        virtual void visitAssignStatement(AssignStatement *node) {};
+        virtual void visitEmptyStatement(EmptyStatement *node) {};
+        virtual void visitVarDeclaration(VarDeclaration *node) {};
+        virtual void visitDeclarationRoot(DeclarationRoot *node) {};
+        virtual void visitBlock(Block *node) {};
+        virtual void visitProgramNode(ProgramNode *node) {};
+};
+
 class Node {
     public:
-        Node();
-        Node(Node *node);
-        virtual ~Node();
-        virtual void print();
+        Node() {};
+        Node(Node *node) {};
+        virtual void accept(Visitor *visitor) = 0;
+        virtual void print() = 0;
         // some derived classes will have child nodes
 };
-Node::Node() {}
-Node::Node(Node *node) { std::cout << "Node constructor with node pointer as parameter\n"; }
-Node::~Node() {}
-void Node::print() {}
+
 
 class NumberNode: public Node {
     public:
         std::shared_ptr<Token> token;
         int value;
         NumberNode(std::shared_ptr<Token> token);
+        void accept(Visitor *visitor);
         void print();
     private:
         std::string to_string(int num);
@@ -116,6 +148,9 @@ std::string NumberNode::to_string(int num) {
     }
     return res;
 }
+void NumberNode::accept(Visitor *visitor)  {
+    visitor->visitNumberNode(this);
+}
 void NumberNode::print() {
     std::printf("NumberNode: { Value: %d }\n", value);
 }
@@ -127,12 +162,16 @@ class BinaryOp: public Node {
         std::unique_ptr<Node> left;
         std::unique_ptr<Node> right;
         BinaryOp(std::shared_ptr<Token> op, std::unique_ptr<Node> left, std::unique_ptr<Node> right);
-        void print();
+        void accept(Visitor *visitor) override;
+        void print() override;
 };
 BinaryOp::BinaryOp(std::shared_ptr<Token> op, std::unique_ptr<Node> left, std::unique_ptr<Node> right) {
     this->op = op;
     this->left = std::move(left);
     this->right = std::move(right);
+}
+void BinaryOp::accept(Visitor *visitor) {
+    visitor->visitBinaryOp(this);
 }
 void BinaryOp::print() {
     std::cout << "BinaryOp: { Type: " << tokenType_tostring(op->tokenType) << " }\n";
@@ -144,11 +183,15 @@ class UnaryOp: public Node {
         std::shared_ptr<Token> op;
         std::unique_ptr<Node> factor; // only child node
         UnaryOp(std::shared_ptr<Token> op, std::unique_ptr<Node> factor);
-        void print();
+        void accept(Visitor *visitor) override;
+        void print() override;
 };
 UnaryOp::UnaryOp(std::shared_ptr<Token> op, std::unique_ptr<Node> factor) {
     this->op = op;
     this->factor = std::move(factor);
+}
+void UnaryOp::accept(Visitor *visitor) {
+    visitor->visitUnaryOp(this);
 }
 void UnaryOp::print() {
     std::cout << "Unary Operator Token: { Type: " << tokenType_tostring(op->tokenType) << " }\n";
@@ -159,11 +202,15 @@ class VariableNode: public Node {
         std::shared_ptr<Token> variableToken;
         std::string name;
         VariableNode(std::shared_ptr<Token> token);
-        void print();
+        void accept(Visitor *visitor) override;
+        void print() override;
 };
 VariableNode::VariableNode(std::shared_ptr<Token> token) {
     this->variableToken = token;
     this->name = token->value;
+}
+void VariableNode::accept(Visitor *visitor) {
+    visitor->visitVariableNode(this);
 }
 void VariableNode::print() {
     std::cout << "Variable {\"name\" = \"" << name << "\"}\n";
@@ -173,10 +220,14 @@ class CompoundStatement: public Node {
     public:
         std::vector<std::unique_ptr<Node>> statementList;
         CompoundStatement(std::vector<std::unique_ptr<Node>>&& list);
-        void print();
+        void accept(Visitor *visitor) override;
+        void print() override;
 };
 CompoundStatement::CompoundStatement(std::vector<std::unique_ptr<Node>>&& list) {
     this->statementList = std::move(list);
+}
+void CompoundStatement::accept(Visitor *visitor) {
+    visitor->visitCompoundStatement(this);
 }
 void CompoundStatement::print() {
     std::cout << "Compound Statement\n";
@@ -187,12 +238,16 @@ class AssignStatement: public Node {
         std::shared_ptr<Token> assignment;
         std::unique_ptr<Node> right;      
         AssignStatement(std::unique_ptr<Node> variable, std::shared_ptr<Token> assignment, std::unique_ptr<Node> expr);
+        void accept(Visitor *visitor) override;
         void print();
 };
 AssignStatement::AssignStatement(std::unique_ptr<Node> variable, std::shared_ptr<Token> assignment, std::unique_ptr<Node> expr) {
     this->left = std::move(variable);
     this->assignment = assignment;
     this->right = std::move(expr);
+}
+void AssignStatement::accept(Visitor *visitor) {
+    visitor->visitAssignStatement(this);
 }
 void AssignStatement::print() {
     Node *leftRaw = left.get();
@@ -204,10 +259,13 @@ void AssignStatement::print() {
 }
 class EmptyStatement: public Node {
     public:
-        EmptyStatement();
-        void print();
+        EmptyStatement() {};
+        void accept(Visitor *visitor) override;
+        void print() override;
 };
-EmptyStatement::EmptyStatement() {}
+void EmptyStatement::accept(Visitor *visitor) {
+    visitor->visitEmptyStatement(this);
+}
 void EmptyStatement::print() {
     std::printf("Empty Statement\n");
 }
@@ -217,6 +275,8 @@ class TypeNode: public Node {
         TypeNode(TokenType tokenType) {
             type = std::make_unique<Token>(tokenType, tokenType_tostring(tokenType));
         }
+        void accept(Visitor *visitor) override {}
+        void print() override {}
 };
 // tokenType must be INTEGER or REAL
 class VarDeclaration: public Node {
@@ -226,6 +286,9 @@ class VarDeclaration: public Node {
         VarDeclaration(std::unique_ptr<Node> varNode, TokenType tokenType) {
             this->varNode = std::move(varNode);
             this->typeNode = std::make_unique<TypeNode>(tokenType);
+        }
+        void accept(Visitor *visitor) override {
+            visitor->visitVarDeclaration(this);
         }
         void print() override {
             // "a : INTEGER"
@@ -241,6 +304,9 @@ class DeclarationRoot: public Node {
         DeclarationRoot(std::vector<std::unique_ptr<Node>> &declarations) {
             this->declarations = std::move(declarations);
         }
+        void accept(Visitor *visitor) override {
+            visitor->visitDeclarationRoot(this);
+        }
         void print() override {
             std::cout << "Declaration Root\n";
         }
@@ -253,6 +319,9 @@ class Block: public Node {
         Block(std::unique_ptr<Node> decRoot, std::unique_ptr<Node> compoundStatement) {
             this->decRoot = std::move(decRoot);
             this->compoundStatement = std::move(compoundStatement); 
+        }
+        void accept(Visitor *visitor) override {
+            visitor->visitBlock(this);
         }
         void print() override {
             std::cout << "Block\n";
@@ -267,10 +336,16 @@ class ProgramNode: public Node {
             this->programName = programName;
             this->block = std::move(block);
         }
+        void accept(Visitor *visitor) override {
+            visitor->visitProgramNode(this);
+        }
         void print() override {
             std::cout << "Program \"" << programName->value << ".pas\" \n";
         }
 };
+
+
+
 
 
 // --------------------------------------------------------------
@@ -424,7 +499,7 @@ std::shared_ptr<Token> Lexer::get_next_token() {
 class Parser {
     private:
         std::unique_ptr<Lexer> lexer;
-        std::shared_ptr<Token> currentToken; // should this be a raw pointer?
+        std::shared_ptr<Token> currentToken;
         void error(const std::string &message);
         void eat(TokenType aTokenType);
         std::unique_ptr<Node> program(); 
@@ -654,6 +729,103 @@ std::unique_ptr<Node> Parser::parse() {
     return program();
 }
 
+// ------------------------------------------------------------------------
+
+class PrintVisitor: public Visitor {
+    private:
+        int level;
+        void print_with_tabs(int numTabs, const std::string &msg) {
+            for (int i = 0; i < numTabs; ++i) {
+                std::printf("    ");
+            }
+            std::cout << msg;
+        };
+    public:
+        PrintVisitor() {
+            level = 0;
+        };
+        void visitNumberNode(NumberNode *node) override {
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitBinaryOp(BinaryOp *node) override {
+            ++level;
+            node->left->accept(this);
+            node->right->accept(this);
+            --level;
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitUnaryOp(UnaryOp *node) override {
+            ++level;
+            node->factor->accept(this);
+            --level;
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitVariableNode(VariableNode *node) override {
+            print_with_tabs(level, "");
+            node->print();
+        };
+        void visitCompoundStatement(CompoundStatement *node) override {
+            for (auto &statement : node->statementList) {
+                ++level;
+                statement->accept(this);
+                --level;
+            }
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitAssignStatement(AssignStatement *node) override {
+            ++level;
+            node->left->accept(this);
+            --level;
+
+            print_with_tabs(level+1, ":=\n");
+
+            ++level;
+            node->right->accept(this);
+            --level;
+            
+            print_with_tabs(level,"");
+            node->print();
+        }
+        void visitEmptyStatement(EmptyStatement *node) {
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitVarDeclaration(VarDeclaration *node) {
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitDeclarationRoot(DeclarationRoot *node) {
+            for (auto &dec : node->declarations) {
+                ++level;
+                dec->accept(this);
+                --level;
+            }
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitBlock(Block *node) {
+            ++level;
+            node->decRoot->accept(this);
+            node->compoundStatement->accept(this);
+            --level;
+            print_with_tabs(level, "");
+            node->print();
+        }
+        void visitProgramNode(ProgramNode *node) {
+            ++level;
+            node->block->accept(this);
+            --level;
+            print_with_tabs(level, "");
+            node->print();
+        }
+};
+
+
+// ------------------------------------------------------------------------------
 
 class Interpreter {
     private:
@@ -679,38 +851,6 @@ Interpreter::Interpreter(const std::string &aText) {
     root = parser->parse();
     std::cout << "Interpreter is ready\n";
 }
-// void Interpreter::destructor_helper(Node *root) {
-//     if (root == nullptr) return;
-
-//     if (typeid(*root) == typeid(UnaryOp)) {
-//         UnaryOp *op = dynamic_cast<UnaryOp*>(root);
-//         destructor_helper(op->factor);
-//     }
-
-//     if (typeid(*root) == typeid(BinaryOp)) {
-//         BinaryOp *op = dynamic_cast<BinaryOp*>(root);
-//         destructor_helper(op->left);
-//         destructor_helper(op->right);
-//     }
-
-//     if (typeid(*root) == typeid(AssignStatement)) {
-//         AssignStatement *statement = dynamic_cast<AssignStatement*>(root);
-//         // destructor_helper(statement->left);
-//         // destructor_helper(statement->right);
-//     }   
-
-//     if (typeid(*root) == typeid(CompoundStatement)) {
-//         CompoundStatement *comp = dynamic_cast<CompoundStatement*>(root);
-//         for (Node *child : comp->statementList) {
-//             destructor_helper(child);
-//         }
-//     }
-//     delete root;
-//     return;
-// }
-// Interpreter::~Interpreter() {
-//     delete root;
-// }
 
 
 void Interpreter::error(const std::string &message) {
@@ -831,102 +971,104 @@ void Interpreter::print_with_tabs(int numTabs, const std::string &msg) {
     }
     std::cout << msg;
 }
-void Interpreter::print_expr_postorder(Node *root, int level) {
-    if (root == nullptr) return;
-    if (typeid(*root) == typeid(UnaryOp)) {
-        UnaryOp *op = dynamic_cast<UnaryOp*>(root);
-        print_expr_postorder(op->factor.get(), level+1);
-        print_with_tabs(level, "");
-        op->print();
-    }
-    if (typeid(*root) == typeid(BinaryOp)) {
-        BinaryOp *op = dynamic_cast<BinaryOp*>(root);
-        print_expr_postorder(op->left.get(), level+1);
-        print_expr_postorder(op->right.get(), level+1);
-        print_with_tabs(level, "");
-        op->print();
-    }
-    if (typeid(*root) == typeid(NumberNode)) {
-        print_with_tabs(level, "");
-        root->print();
-        return;
-    }
+// void Interpreter::print_expr_postorder(Node *root, int level) {
+//     if (root == nullptr) return;
+//     if (typeid(*root) == typeid(UnaryOp)) {
+//         UnaryOp *op = dynamic_cast<UnaryOp*>(root);
+//         print_expr_postorder(op->factor.get(), level+1);
+//         print_with_tabs(level, "");
+//         op->print();
+//     }
+//     if (typeid(*root) == typeid(BinaryOp)) {
+//         BinaryOp *op = dynamic_cast<BinaryOp*>(root);
+//         print_expr_postorder(op->left.get(), level+1);
+//         print_expr_postorder(op->right.get(), level+1);
+//         print_with_tabs(level, "");
+//         op->print();
+//     }
+//     if (typeid(*root) == typeid(NumberNode)) {
+//         print_with_tabs(level, "");
+//         root->print();
+//         return;
+//     }
 
-    if (typeid(*root) == typeid(VariableNode)) {
-        VariableNode *node = dynamic_cast<VariableNode*>(root);
-        print_with_tabs(level, "");
-        node->print();
-        return;
-    }
-}
-// polymorphism and down casting
-void Interpreter::print_postorder_helper(Node *root, int level) {
-    if (root == nullptr) return; // nullcheck
+//     if (typeid(*root) == typeid(VariableNode)) {
+//         VariableNode *node = dynamic_cast<VariableNode*>(root);
+//         print_with_tabs(level, "");
+//         node->print();
+//         return;
+//     }
+// }
+// // polymorphism and down casting
+// void Interpreter::print_postorder_helper(Node *root, int level) {
+//     if (root == nullptr) return; // nullcheck
 
-    if (typeid(*root) == typeid(VariableNode)) {
-        VariableNode *node = dynamic_cast<VariableNode*>(root);
-        print_with_tabs(level, "");
-        node->print();
-        return;
-    }
-    if (typeid(*root) == typeid(CompoundStatement)) {
-        CompoundStatement *comp = dynamic_cast<CompoundStatement*>(root);
-        for (std::unique_ptr<Node>& child : comp->statementList) {
-            print_postorder_helper(child.get(), level+1);
-        }
-        print_with_tabs(level,"");
-        comp->print();
-        return;
-    }
-    if (typeid(*root) == typeid(AssignStatement)) {
-        AssignStatement *statement = dynamic_cast<AssignStatement*>(root);
-        print_postorder_helper(statement->left.get(), level+1);
-        print_with_tabs(level+1, ":=\n");
-        print_expr_postorder(statement->right.get(), level+1);
-        print_with_tabs(level,"");
-        statement->print();
-        return;
-    }
+//     if (typeid(*root) == typeid(VariableNode)) {
+//         VariableNode *node = dynamic_cast<VariableNode*>(root);
+//         print_with_tabs(level, "");
+//         node->print();
+//         return;
+//     }
+//     if (typeid(*root) == typeid(CompoundStatement)) {
+//         CompoundStatement *comp = dynamic_cast<CompoundStatement*>(root);
+//         for (std::unique_ptr<Node>& child : comp->statementList) {
+//             print_postorder_helper(child.get(), level+1);
+//         }
+//         print_with_tabs(level,"");
+//         comp->print();
+//         return;
+//     }
+//     if (typeid(*root) == typeid(AssignStatement)) {
+//         AssignStatement *statement = dynamic_cast<AssignStatement*>(root);
+//         print_postorder_helper(statement->left.get(), level+1);
+//         print_with_tabs(level+1, ":=\n");
+//         print_expr_postorder(statement->right.get(), level+1);
+//         print_with_tabs(level,"");
+//         statement->print();
+//         return;
+//     }
 
-    if (typeid(*root) == typeid(DeclarationRoot)) {
-        DeclarationRoot *decRoot = dynamic_cast<DeclarationRoot*>(root);
-        if (decRoot->declarations.empty()) {
-            print_with_tabs(level+1,"");
-            std::cout << "No variables declared\n";
-        }
-        else {
-            for (auto &varDec : decRoot->declarations) {
-                print_with_tabs(level+1,"");
-                varDec->print();
-            }
-        }
-        print_with_tabs(level,"");
-        decRoot->print();
-        return;
-    }
+//     if (typeid(*root) == typeid(DeclarationRoot)) {
+//         DeclarationRoot *decRoot = dynamic_cast<DeclarationRoot*>(root);
+//         if (decRoot->declarations.empty()) {
+//             print_with_tabs(level+1,"");
+//             std::cout << "No variables declared\n";
+//         }
+//         else {
+//             for (auto &varDec : decRoot->declarations) {
+//                 print_with_tabs(level+1,"");
+//                 varDec->print();
+//             }
+//         }
+//         print_with_tabs(level,"");
+//         decRoot->print();
+//         return;
+//     }
 
-    if (typeid(*root) == typeid(Block)) {
-        Block *block = dynamic_cast<Block*>(root);
-        print_postorder_helper(block->decRoot.get(), level+1);
-        print_postorder_helper(block->compoundStatement.get(), level+1);
-        print_with_tabs(level,"");
-        block->print();
-        return;
-    }
+//     if (typeid(*root) == typeid(Block)) {
+//         Block *block = dynamic_cast<Block*>(root);
+//         print_postorder_helper(block->decRoot.get(), level+1);
+//         print_postorder_helper(block->compoundStatement.get(), level+1);
+//         print_with_tabs(level,"");
+//         block->print();
+//         return;
+//     }
 
-    if (typeid(*root) == typeid(ProgramNode)) {
-        ProgramNode *program = dynamic_cast<ProgramNode*>(root);
-        print_postorder_helper(program->block.get(), level+1);
-        print_with_tabs(level,"");
-        program->print();
-        return;
-    }
+//     if (typeid(*root) == typeid(ProgramNode)) {
+//         ProgramNode *program = dynamic_cast<ProgramNode*>(root);
+//         print_postorder_helper(program->block.get(), level+1);
+//         print_with_tabs(level,"");
+//         program->print();
+//         return;
+//     }
     
-    print_with_tabs(level,"");
-    root->print();
-}
+//     print_with_tabs(level,"");
+//     root->print();
+// }
 void Interpreter::print_postorder() {
-    print_postorder_helper(root.get(), 0);
+    std::unique_ptr<Visitor> printVisitor = std::make_unique<PrintVisitor>();
+    root->accept(printVisitor.get());
+    // print_postorder_helper(root.get(), 0);
 }
 void Interpreter::print_global_scope() {
     std::printf("\nGLOBAL SCOPE: \n");
@@ -992,8 +1134,8 @@ int main(int argc, char **argv) {
     try {
         std::unique_ptr<Interpreter> interpreter = std::make_unique<Interpreter>(input);
         interpreter->print_postorder();
-        interpreter->interpret();
-        interpreter->print_global_scope();
+        // interpreter->interpret();
+        // interpreter->print_global_scope();
         std::cout << "Done" << std::endl;
     }
     catch (std::runtime_error e) {
