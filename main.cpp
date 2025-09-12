@@ -194,7 +194,7 @@ void UnaryOp::accept(Visitor *visitor) {
     visitor->visitUnaryOp(this);
 }
 void UnaryOp::print() {
-    std::cout << "Unary Operator Token: { Type: " << tokenType_tostring(op->tokenType) << " }\n";
+    std::cout << "UnaryOp: { Type: " << tokenType_tostring(op->tokenType) << " }\n";
 }
 
 class VariableNode: public Node {
@@ -773,8 +773,8 @@ class EvalVisitor: public Visitor {
             node->factor->accept(this);
             int factorVal = nodeValues[node->factor.get()];
             switch (node->op->tokenType) {
-                case TokenType::SUB: nodeValues[node] = -factorVal;
-                case TokenType::ADD: nodeValues[node] = factorVal;
+                case TokenType::SUB: nodeValues[node] = -factorVal; break;
+                case TokenType::ADD: nodeValues[node] = factorVal; break;
                 default: error("Invalid unary operator token");
             }
         }
