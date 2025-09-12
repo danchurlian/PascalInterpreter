@@ -1,15 +1,8 @@
 program Test;
 var
     a, b, c : INTEGER;
-
 begin
     a := 6;
     b := (a * 2);
-    c := (a + b * 2 + 5);
-
-    begin 
-        a := (c * 2);
-        b := (a + c);
-        c := (a div 2);
-    end;
+    c := ((a + b) div 2 + 9);
 end.

@@ -731,6 +731,100 @@ std::unique_ptr<Node> Parser::parse() {
 
 // ------------------------------------------------------------------------
 
+class EvalVisitor: public Visitor {
+    private:
+        std::unordered_map<Node*, int> nodeValues;
+        std::unordered_map<std::string, int> varValues;
+        void error(const std::string &msg) {
+            std::string errormsg = "EvalVisitor error: ";
+            throw std::runtime_error(errormsg +msg+ "\n");
+        }
+    public:
+        EvalVisitor() {};
+        std::unordered_map<std::string, int> getVarValues() {
+            return varValues;
+        }
+        void visitNumberNode(NumberNode *node) override {
+            nodeValues[node] = node->value;
+        }
+        void visitBinaryOp(BinaryOp *node) override {
+            node->left->accept(this);
+            node->right->accept(this);
+            try {
+                int leftVal = nodeValues[node->left.get()];
+                int rightVal = nodeValues[node->right.get()];
+                int result = 0;
+                switch (node->op->tokenType) {
+                    case TokenType::ADD: result = leftVal + rightVal; break;
+                    case TokenType::SUB: result = leftVal - rightVal; break;
+                    case TokenType::MUL: result = leftVal * rightVal; break;
+                    case TokenType::DIV: result = leftVal / rightVal; break;
+                    case TokenType::INT_DIV: result = leftVal / rightVal; break;
+                    default: error("Unknown binary op value");
+                }
+                nodeValues[node] = result;
+            }
+            catch (std::runtime_error &e) {
+                std::string errormsg = "Invalid node left and right values ";
+                error(errormsg + e.what());
+            }
+        }
+        void visitUnaryOp(UnaryOp *node) override {
+            node->factor->accept(this);
+            int factorVal = nodeValues[node->factor.get()];
+            switch (node->op->tokenType) {
+                case TokenType::SUB: nodeValues[node] = -factorVal;
+                case TokenType::ADD: nodeValues[node] = factorVal;
+                default: error("Invalid unary operator token");
+            }
+        }
+        // only for right-hand side evaluation (math expressions)
+        void visitVariableNode(VariableNode *node) override {
+            if (varValues.find(node->name) == varValues.end()) {
+                error("Variable \"" +node->name+ "\" was not not initialized");
+                return;
+            }
+            nodeValues[node] = varValues[node->name];
+        }
+        void visitAssignStatement(AssignStatement *node) {
+            VariableNode *leftNode = dynamic_cast<VariableNode*>(node->left.get());
+            std::string varName = leftNode->name;
+            if (varValues.find(varName) == varValues.end()) {
+                error("Variable \"" +varName+ "\" was not declared");
+                return;
+            }
+            node->right->accept(this);
+            int rightValue = nodeValues[node->right.get()];
+            varValues[varName] = rightValue;
+        }
+        void visitEmptyStatement(EmptyStatement *node) {
+            // nothing
+        }
+        void visitCompoundStatement(CompoundStatement *node) {
+            for (auto &child : node->statementList) {
+                child->accept(this);
+            }
+        }
+        void visitVarDeclaration(VarDeclaration *node) {
+            VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
+            varValues[varNode->name] = 0;
+        }
+        void visitDeclarationRoot(DeclarationRoot *node) {
+            for (auto &child : node->declarations) {
+                child->accept(this);
+            }
+        }
+        void visitBlock(Block *node) {
+            node->decRoot->accept(this);
+            node->compoundStatement->accept(this);
+        }
+        void visitProgramNode(ProgramNode *node) {
+            node->block->accept(this);
+        }
+};
+
+// ------------------------------------------------------------------------
+
 class PrintVisitor: public Visitor {
     private:
         int level;
@@ -786,7 +880,7 @@ class PrintVisitor: public Visitor {
             ++level;
             node->right->accept(this);
             --level;
-            
+
             print_with_tabs(level,"");
             node->print();
         }
@@ -825,7 +919,7 @@ class PrintVisitor: public Visitor {
 };
 
 
-// ------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 class Interpreter {
     private:
@@ -833,15 +927,8 @@ class Interpreter {
         std::unordered_map<std::string, int> GLOBAL_SCOPE;
         std::unique_ptr<Node> root;
         void error(const std::string &message);
-        int eval_expr(Node *root);
-        void eval_helper(Node *root);
-        void print_expr_postorder(Node *root, int level);
-        void print_with_tabs(int numTabs, const std::string &msg);
-        void print_postorder_helper(Node *root, int level);
-        // void destructor_helper(Node *root);
     public:
         Interpreter(const std::string &aText);
-        // ~Interpreter();
         void interpret();
         void print_postorder();
         void print_global_scope();
@@ -849,226 +936,24 @@ class Interpreter {
 Interpreter::Interpreter(const std::string &aText) {
     parser = std::make_unique<Parser>(aText);
     root = parser->parse();
-    std::cout << "Interpreter is ready\n";
+    // std::cout << "Interpreter is ready\n";
 }
-
-
 void Interpreter::error(const std::string &message) {
-    throw std::runtime_error("Interpreter failed to interpret expression: " +message);
-}
-int Interpreter::eval_expr(Node *root) {
-    if (root == nullptr) return 0;
-
-    if (typeid(*root) == typeid(NumberNode)) {
-        NumberNode *numNode = dynamic_cast<NumberNode*>(root);
-        return numNode->value;
-    }
-
-    if (typeid(*root) == typeid(VariableNode)) {
-        VariableNode *node = dynamic_cast<VariableNode*>(root);
-        if (GLOBAL_SCOPE.find(node->name) == GLOBAL_SCOPE.end()) {
-            error("Variable \"" +node->name+ "\" was not declared");
-        }
-        return GLOBAL_SCOPE[node->name];
-    }
-
-    if (typeid(*root) == typeid(UnaryOp)) {
-        UnaryOp *op = dynamic_cast<UnaryOp*>(root);
-        int childResult = eval_expr(op->factor.get());
-        switch (op->op->tokenType) {
-            case TokenType::ADD: return childResult;
-            case TokenType::SUB: return -childResult;
-        }    
-    }
-
-    if (typeid(*root) == typeid(BinaryOp)) {
-        BinaryOp *op = dynamic_cast<BinaryOp*>(root);
-        int leftResult = eval_expr(op->left.get());
-        int rightResult = eval_expr(op->right.get());
-    
-        switch (op->op->tokenType) {
-            case TokenType::ADD: return leftResult + rightResult;
-            case TokenType::SUB: return leftResult - rightResult;
-            case TokenType::MUL: return leftResult * rightResult;
-            case TokenType::DIV: return leftResult / rightResult;
-            case TokenType::INT_DIV: return leftResult / rightResult;
-        }
-    }
-
-    error("Evaluation helper failed");
-    return 0;
-}
-void Interpreter::eval_helper(Node *root) {
-    if (root == nullptr) return;
-
-    if (typeid(*root) == typeid(AssignStatement)) {
-        AssignStatement *statement = dynamic_cast<AssignStatement*>(root);
-        Node *leftRaw = statement->left.get();
-        Node *rightRaw = statement->right.get();
-        // if (leftRaw == nullptr || rightRaw == nullptr) return; 
-        if (typeid(*leftRaw) == typeid(VariableNode)) {
-            VariableNode *variableNode = dynamic_cast<VariableNode*>(leftRaw);
-            std::string key = variableNode->name;
-            if (GLOBAL_SCOPE.find(key) == GLOBAL_SCOPE.end()) {
-                error("Variable \"" +key+ "\" was not declared");
-            }
-
-            int value = eval_expr(rightRaw);
-            this->GLOBAL_SCOPE[key] = value;
-        }
-        return;
-    }   
-
-    if (typeid(*root) == typeid(CompoundStatement)) {
-        CompoundStatement *comp = dynamic_cast<CompoundStatement*>(root);
-        comp->statementList;
-        for (std::unique_ptr<Node>& child : comp->statementList) {
-            eval_helper(child.get());
-        }
-        return;
-    }
-
-    if (typeid(*root) == typeid(EmptyStatement)) {
-        return;
-    }
-
-    if (typeid(*root) == typeid(VarDeclaration)) {
-        VarDeclaration *dec = dynamic_cast<VarDeclaration*>(root);
-        VariableNode *var = dynamic_cast<VariableNode*>(dec->varNode.get());
-        std::string name = var->name;
-        GLOBAL_SCOPE[name] = 0;
-        return;
-    }
-
-    if (typeid(*root) == typeid(DeclarationRoot)) {
-        DeclarationRoot *decRoot = dynamic_cast<DeclarationRoot*>(root);
-        for (auto &varDec : decRoot->declarations) {
-            eval_helper(varDec.get());
-        }
-        return;
-    }
-
-    if (typeid(*root) == typeid(Block)) {
-        Block *node = dynamic_cast<Block*>(root);
-        eval_helper(node->decRoot.get());
-        eval_helper(node->compoundStatement.get());
-    }
-
-    if (typeid(*root) == typeid(ProgramNode)) {
-        ProgramNode *node = dynamic_cast<ProgramNode*>(root);
-        eval_helper(node->block.get());
-        return;
-    }
-
-
+    throw std::runtime_error("Interpreter error: " +message);
 }
 void Interpreter::interpret() {
-    eval_helper(root.get());
-}
-void Interpreter::print_with_tabs(int numTabs, const std::string &msg) {
-    for (int i = 0; i < numTabs; ++i) {
-        std::printf("    ");
+    std::unique_ptr<EvalVisitor> evalVisitor = std::make_unique<EvalVisitor>();
+    try {
+        root->accept(evalVisitor.get());
+        GLOBAL_SCOPE = evalVisitor->getVarValues();
     }
-    std::cout << msg;
+    catch(const std::exception& e) {
+        error(e.what());
+    }
 }
-// void Interpreter::print_expr_postorder(Node *root, int level) {
-//     if (root == nullptr) return;
-//     if (typeid(*root) == typeid(UnaryOp)) {
-//         UnaryOp *op = dynamic_cast<UnaryOp*>(root);
-//         print_expr_postorder(op->factor.get(), level+1);
-//         print_with_tabs(level, "");
-//         op->print();
-//     }
-//     if (typeid(*root) == typeid(BinaryOp)) {
-//         BinaryOp *op = dynamic_cast<BinaryOp*>(root);
-//         print_expr_postorder(op->left.get(), level+1);
-//         print_expr_postorder(op->right.get(), level+1);
-//         print_with_tabs(level, "");
-//         op->print();
-//     }
-//     if (typeid(*root) == typeid(NumberNode)) {
-//         print_with_tabs(level, "");
-//         root->print();
-//         return;
-//     }
-
-//     if (typeid(*root) == typeid(VariableNode)) {
-//         VariableNode *node = dynamic_cast<VariableNode*>(root);
-//         print_with_tabs(level, "");
-//         node->print();
-//         return;
-//     }
-// }
-// // polymorphism and down casting
-// void Interpreter::print_postorder_helper(Node *root, int level) {
-//     if (root == nullptr) return; // nullcheck
-
-//     if (typeid(*root) == typeid(VariableNode)) {
-//         VariableNode *node = dynamic_cast<VariableNode*>(root);
-//         print_with_tabs(level, "");
-//         node->print();
-//         return;
-//     }
-//     if (typeid(*root) == typeid(CompoundStatement)) {
-//         CompoundStatement *comp = dynamic_cast<CompoundStatement*>(root);
-//         for (std::unique_ptr<Node>& child : comp->statementList) {
-//             print_postorder_helper(child.get(), level+1);
-//         }
-//         print_with_tabs(level,"");
-//         comp->print();
-//         return;
-//     }
-//     if (typeid(*root) == typeid(AssignStatement)) {
-//         AssignStatement *statement = dynamic_cast<AssignStatement*>(root);
-//         print_postorder_helper(statement->left.get(), level+1);
-//         print_with_tabs(level+1, ":=\n");
-//         print_expr_postorder(statement->right.get(), level+1);
-//         print_with_tabs(level,"");
-//         statement->print();
-//         return;
-//     }
-
-//     if (typeid(*root) == typeid(DeclarationRoot)) {
-//         DeclarationRoot *decRoot = dynamic_cast<DeclarationRoot*>(root);
-//         if (decRoot->declarations.empty()) {
-//             print_with_tabs(level+1,"");
-//             std::cout << "No variables declared\n";
-//         }
-//         else {
-//             for (auto &varDec : decRoot->declarations) {
-//                 print_with_tabs(level+1,"");
-//                 varDec->print();
-//             }
-//         }
-//         print_with_tabs(level,"");
-//         decRoot->print();
-//         return;
-//     }
-
-//     if (typeid(*root) == typeid(Block)) {
-//         Block *block = dynamic_cast<Block*>(root);
-//         print_postorder_helper(block->decRoot.get(), level+1);
-//         print_postorder_helper(block->compoundStatement.get(), level+1);
-//         print_with_tabs(level,"");
-//         block->print();
-//         return;
-//     }
-
-//     if (typeid(*root) == typeid(ProgramNode)) {
-//         ProgramNode *program = dynamic_cast<ProgramNode*>(root);
-//         print_postorder_helper(program->block.get(), level+1);
-//         print_with_tabs(level,"");
-//         program->print();
-//         return;
-//     }
-    
-//     print_with_tabs(level,"");
-//     root->print();
-// }
 void Interpreter::print_postorder() {
     std::unique_ptr<Visitor> printVisitor = std::make_unique<PrintVisitor>();
     root->accept(printVisitor.get());
-    // print_postorder_helper(root.get(), 0);
 }
 void Interpreter::print_global_scope() {
     std::printf("\nGLOBAL SCOPE: \n");
@@ -1116,7 +1001,6 @@ void input_loop() {
             print_help();
             continue;
         }
-        
     }
 }
 
@@ -1134,12 +1018,12 @@ int main(int argc, char **argv) {
     try {
         std::unique_ptr<Interpreter> interpreter = std::make_unique<Interpreter>(input);
         interpreter->print_postorder();
-        // interpreter->interpret();
-        // interpreter->print_global_scope();
+        interpreter->interpret();
+        interpreter->print_global_scope();
         std::cout << "Done" << std::endl;
     }
     catch (std::runtime_error e) {
-        std::cout << "Exception raised. " << e.what() << std::endl;
+        std::cerr << e.what() << std::endl;
     }
     return 0;
 }

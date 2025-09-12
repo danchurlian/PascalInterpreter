@@ -13,7 +13,7 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/a.out",
+            "program": "${workspaceFolder}/run",
             "args": ["test.txt"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
