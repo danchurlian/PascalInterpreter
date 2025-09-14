@@ -68,10 +68,20 @@ const std::string tokenType_tostring(TokenType aTokenType) {
 
 class Token {
     public:
+        static std::unordered_map<std::string, TokenType> KEYWORDS;
         TokenType tokenType;
         std::string value;
         Token(TokenType aTokenType, const std::string& aValue);
         void print();
+};
+std::unordered_map<std::string, TokenType> Token::KEYWORDS = {
+    {"begin", TokenType::BEGIN},
+    {"end", TokenType::END},
+    {"program", TokenType::PROGRAM},
+    {"var", TokenType::VAR},
+    {"integer", TokenType::INTEGER},
+    {"real", TokenType::REAL},
+    {"div", TokenType::INT_DIV},
 };
 Token::Token(TokenType aTokenType, const std::string& aValue) {
     tokenType = aTokenType;
@@ -414,7 +424,6 @@ std::string Lexer::identifier() {
 }
 std::shared_ptr<Token> Lexer::get_next_token() {
     if (currentChar == '\0') {
-        // TokenNode *newToken = new TokenNode(TokenType::END_OF_FILE, 0);
         return std::make_shared<Token>(TokenType::END_OF_FILE, "EOF");
     }
     if (currentChar == ' ' || currentChar == '\n') {
@@ -427,27 +436,9 @@ std::shared_ptr<Token> Lexer::get_next_token() {
         std::string id = identifier();
         std::string lexeme = id;
         std::transform(lexeme.begin(), lexeme.end(), lexeme.begin(), ::tolower);
-
-        if (lexeme.compare("begin") == 0) {
-            return std::make_shared<Token>(TokenType::BEGIN, "BEGIN");
-        }
-        if (lexeme.compare("end") == 0) {
-            return std::make_shared<Token>(TokenType::END, "END");
-        }
-        if (lexeme.compare("program") == 0) {
-            return std::make_shared<Token>(TokenType::PROGRAM, "END");
-        }
-        if (lexeme.compare("var") == 0) {
-            return std::make_shared<Token>(TokenType::VAR, "VAR");
-        }
-        if (lexeme.compare("integer") == 0) {
-            return std::make_shared<Token>(TokenType::INTEGER, "INTEGER");
-        }
-        if (lexeme.compare("real") == 0) {
-            return std::make_shared<Token>(TokenType::REAL, "REAL");
-        }
-        if (lexeme.compare("div") == 0) {
-            return std::make_shared<Token>(TokenType::INT_DIV, "DIV");
+        auto pair = Token::KEYWORDS.find(lexeme);
+        if (pair != Token::KEYWORDS.end()) {
+            return std::make_shared<Token>(pair->second, pair->first);
         }
         return std::make_shared<Token>(TokenType::VARIABLE, id);
     }
