@@ -1,8 +1,7 @@
 program Test;
 var
-    a, b, c : INTEGER;
+    a : INTEGER;
 begin
     a := 6;
-    b := -(a * 2);
-    c := -((a + b) div 2 + 9);
+    { a := 2; }
 end.

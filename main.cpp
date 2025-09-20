@@ -109,6 +109,54 @@ class ProgramNode;
 
 // --------------------------------------------------------------
 
+// Abstract class
+class Symbol {
+    public:
+        enum class Type { INTEGER, REAL, NO_TYPE };
+        const std::string name;
+    private:
+        std::shared_ptr<Symbol> type;
+    public:
+        Symbol(const std::string &name) : name(name), type(nullptr) {};
+
+        Symbol(const std::string &name, std::shared_ptr<Symbol> type) : name(name), type(type) {};
+};
+
+class VarSymbol: public Symbol {
+    public:
+        VarSymbol(const std::string &name, std::shared_ptr<Symbol> type) : Symbol(name, type) {};
+};
+
+class BuiltinTypeSymbol: public Symbol {
+    public:
+        BuiltinTypeSymbol(const std::string &name) : Symbol(name) {};
+};
+
+
+class SymbolTable {
+    private:
+        std::unordered_map<std::string, std::shared_ptr<Symbol>> map;
+    public:
+        SymbolTable() {
+            define(std::make_unique<BuiltinTypeSymbol>("INTEGER"));
+            define(std::make_unique<BuiltinTypeSymbol>("REAL"));
+        };
+        // for variable symbols, their type symbols will point to the type symbols in the map.
+        void define(std::shared_ptr<Symbol> &&sym) {
+            std::string name = sym->name;
+            map[name] = sym;
+        };
+        std::shared_ptr<Symbol> lookup(const std::string &symName) {
+            std::shared_ptr<Symbol> result = nullptr;
+            auto pair = map.find(symName);
+            if (pair != map.end())
+                result = pair->second;
+            return result;
+        }
+};
+
+// --------------------------------------------------------------
+
 class Visitor {
     public:
         Visitor() {};
@@ -368,6 +416,7 @@ class Lexer {
         void error(const std::string &message);
         char peek();
         void advance();
+        void skip_comment();
         void skip_whitespace();
         std::string integer();
         std::string identifier();
@@ -400,6 +449,13 @@ void Lexer::advance() {
         currentChar = text[pos];
     }
 }
+void Lexer::skip_comment() {
+    while (currentChar != '}' && currentChar != '\0') {
+        advance();
+    }
+    if (currentChar == '}')
+        advance();
+}
 void Lexer::skip_whitespace() {
     while(currentChar == ' ' || currentChar == '\n') {
         advance();
@@ -426,8 +482,13 @@ std::shared_ptr<Token> Lexer::get_next_token() {
     if (currentChar == '\0') {
         return std::make_shared<Token>(TokenType::END_OF_FILE, "EOF");
     }
-    if (currentChar == ' ' || currentChar == '\n') {
-        skip_whitespace();
+    while (currentChar == ' ' || currentChar == '\n' || currentChar == '{') {
+        if (currentChar == ' ' || currentChar == '\n') {
+            skip_whitespace();
+        }
+        else {
+            skip_comment();
+        }
     }
     if (currentChar - '0' >= 0 && currentChar - '0' <= 9) {
         return std::make_shared<Token>(TokenType::INT, integer());
@@ -719,6 +780,38 @@ std::unique_ptr<Node> Parser::expr() {
 std::unique_ptr<Node> Parser::parse() {
     return program();
 }
+
+// ------------------------------------------------------------------------
+
+class SymTableBuilder: public Visitor {
+    private:
+        std::unique_ptr<SymbolTable> symTable;
+
+    public:
+        SymTableBuilder() {};
+
+        void visitVarDeclaration(VarDeclaration *node) override {
+            VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
+            TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
+            std::string typeName = tokenType_tostring(typeNode->type->tokenType);
+            std::shared_ptr<Symbol> typeSym = symTable->lookup(typeName);
+            symTable->define(std::make_shared<VarSymbol>(varNode->name, std::shared_ptr<Symbol>(typeSym)));
+        }
+
+        void visitDeclarationRoot(DeclarationRoot *node) override {
+            for (auto &child : node->declarations) {
+                child->accept(this);
+            }
+        }
+
+        void visitBlock(Block *node) override {
+            node->decRoot->accept(this);
+        }
+
+        void visitProgramNode(ProgramNode *node) override {
+            node->block->accept(this);
+        }
+};
 
 // ------------------------------------------------------------------------
 
