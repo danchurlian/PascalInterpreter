@@ -114,22 +114,32 @@ class Symbol {
     public:
         enum class Type { INTEGER, REAL, NO_TYPE };
         const std::string name;
-    private:
         std::shared_ptr<Symbol> type;
+    private:
     public:
         Symbol(const std::string &name) : name(name), type(nullptr) {};
 
         Symbol(const std::string &name, std::shared_ptr<Symbol> type) : name(name), type(type) {};
+
+        virtual void print() = 0;
 };
 
 class VarSymbol: public Symbol {
     public:
         VarSymbol(const std::string &name, std::shared_ptr<Symbol> type) : Symbol(name, type) {};
+
+        void print() override {
+            std::cout << "Var symbol: " << name << " | ";
+            type->print(); 
+        }
 };
 
 class BuiltinTypeSymbol: public Symbol {
     public:
         BuiltinTypeSymbol(const std::string &name) : Symbol(name) {};
+        void print() override {
+            std::cout << "Type symbol: " << name;
+        }
 };
 
 
@@ -152,6 +162,14 @@ class SymbolTable {
             if (pair != map.end())
                 result = pair->second;
             return result;
+        }
+        void print() {
+            for (auto &pair : map) {
+                std::cout << "Pair: { " << pair.first;
+                std::cout << ", ";
+                pair.second->print();
+                std::cout << " }\n";
+            }
         }
 };
 
@@ -788,14 +806,28 @@ class SymTableBuilder: public Visitor {
         std::unique_ptr<SymbolTable> symTable;
 
     public:
-        SymTableBuilder() {};
+        SymTableBuilder() {
+            symTable = std::make_unique<SymbolTable>();
+        };
+
+        void print_table() {
+            symTable->print();
+        }
+
+        void visitVariableNode(VariableNode *node) override {
+            std::string name = node->name;
+            if (symTable->lookup(name) == nullptr) {
+                throw std::runtime_error("SymTableBuilder found undeclared variable");
+            }
+        }
 
         void visitVarDeclaration(VarDeclaration *node) override {
             VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
             std::string typeName = tokenType_tostring(typeNode->type->tokenType);
             std::shared_ptr<Symbol> typeSym = symTable->lookup(typeName);
-            symTable->define(std::make_shared<VarSymbol>(varNode->name, std::shared_ptr<Symbol>(typeSym)));
+            std::shared_ptr<VarSymbol> varSymbol = std::make_shared<VarSymbol>(varNode->name, typeSym);
+            symTable->define(varSymbol);
         }
 
         void visitDeclarationRoot(DeclarationRoot *node) override {
@@ -1015,12 +1047,12 @@ class Interpreter {
         Interpreter(const std::string &aText);
         void interpret();
         void print_postorder();
+        void build_symbol_table();
         void print_global_scope();
 };
 Interpreter::Interpreter(const std::string &aText) {
     parser = std::make_unique<Parser>(aText);
     root = parser->parse();
-    // std::cout << "Interpreter is ready\n";
 }
 void Interpreter::error(const std::string &message) {
     throw std::runtime_error("Interpreter error: " +message);
@@ -1038,6 +1070,16 @@ void Interpreter::interpret() {
 void Interpreter::print_postorder() {
     std::unique_ptr<Visitor> printVisitor = std::make_unique<PrintVisitor>();
     root->accept(printVisitor.get());
+}
+void Interpreter::build_symbol_table() {
+    std::unique_ptr<SymTableBuilder> builder = std::make_unique<SymTableBuilder>();
+    try {
+        root->accept(builder.get());
+        builder->print_table();
+    }
+    catch (const std::runtime_error& e) {
+        error(e.what());
+    }
 }
 void Interpreter::print_global_scope() {
     std::printf("\nGLOBAL SCOPE: \n");
@@ -1100,8 +1142,11 @@ int main(int argc, char **argv) {
     // std::cout << "Input string is " << input << "\n";
 
     try {
+        // std::unique_ptr<SymbolTable> tab = std::make_unique<SymbolTable>();
+        // tab->print();
         std::unique_ptr<Interpreter> interpreter = std::make_unique<Interpreter>(input);
         interpreter->print_postorder();
+        interpreter->build_symbol_table();
         interpreter->interpret();
         interpreter->print_global_scope();
         std::cout << "Done" << std::endl;
