@@ -1,6 +1,13 @@
 program Test;
 var
     a,b,c : INTEGER;
+
+    procedure p1;
+    var
+        d : INTEGER;
+    begin
+        d := 5;
+    end;
 begin
     a := 6;
     b := 7;

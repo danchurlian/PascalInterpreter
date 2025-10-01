@@ -28,6 +28,7 @@ enum class TokenType {
     COLON,
     ASSIGN,
     VARIABLE,
+    PROCEDURE,
     PROGRAM,
     PROGRAM_NAME,
     VAR,
@@ -57,6 +58,7 @@ const std::string tokenType_tostring(TokenType aTokenType) {
         case TokenType::COLON: return "COLON";
         case TokenType::ASSIGN: return "ASSIGN";
         case TokenType::VARIABLE: return "VARIABLE";
+        case TokenType::PROCEDURE: return "PROCEDURE";
         case TokenType::PROGRAM: return "PROGRAM";
         case TokenType::PROGRAM_NAME: return "PROGRAM_NAME";
         case TokenType::VAR: return "VAR";
@@ -79,6 +81,7 @@ std::unordered_map<std::string, TokenType> Token::KEYWORDS = {
     {"end", TokenType::END},
     {"program", TokenType::PROGRAM},
     {"var", TokenType::VAR},
+    {"procedure", TokenType::PROCEDURE},
     {"integer", TokenType::INTEGER},
     {"real", TokenType::REAL},
     {"div", TokenType::INT_DIV},
@@ -104,6 +107,7 @@ class EmptyStatement;
 class TypeNode;
 class VarDeclaration;
 class DeclarationRoot;
+class Procedure;
 class Block;
 class ProgramNode;
 
@@ -188,6 +192,7 @@ class Visitor {
         virtual void visitEmptyStatement(EmptyStatement *node) {};
         virtual void visitVarDeclaration(VarDeclaration *node) {};
         virtual void visitDeclarationRoot(DeclarationRoot *node) {};
+        virtual void visitProcedure(Procedure *node) {};
         virtual void visitBlock(Block *node) {};
         virtual void visitProgramNode(ProgramNode *node) {};
 };
@@ -405,6 +410,22 @@ class Block: public Node {
             std::cout << "Block\n";
         }
 };
+class Procedure: public Node {
+    public:
+        std::shared_ptr<Token> id;
+        std::unique_ptr<Node> block;
+        Procedure(std::shared_ptr<Token> id, std::unique_ptr<Node>&& block) {
+            this->id = id;
+            this->block = std::move(block);
+        }
+        void print() override {
+            std::cout << "Procedure \"" << id->value << "\"\n";
+        }
+        void accept(Visitor *visitor) override {
+            visitor->visitProcedure(this);
+        }
+
+};
 class ProgramNode: public Node {
     public:
         std::shared_ptr<Token> programName;
@@ -576,6 +597,7 @@ class Parser {
         void eat(TokenType aTokenType);
         std::unique_ptr<Node> program(); 
         std::shared_ptr<Token> program_name();
+        std::unique_ptr<Node> procedure();
         std::unique_ptr<Node> block();
         std::unique_ptr<Node> declarationRoot();
         std::vector<std::unique_ptr<Node>> declarationList();
@@ -632,6 +654,15 @@ std::shared_ptr<Token> Parser::program_name() {
     eat(TokenType::VARIABLE);
     return name;
 }
+std::unique_ptr<Node> Parser::procedure() {
+    eat(TokenType::PROCEDURE);
+    std::shared_ptr<Token> name = currentToken;
+    eat(TokenType::VARIABLE);
+    eat(TokenType::SEMI);
+    std::unique_ptr<Node> blockNode = block();
+    eat(TokenType::SEMI);
+    return std::make_unique<Procedure>(name, std::move(blockNode));
+}
 std::unique_ptr<Node> Parser::block() {
     std::unique_ptr<Node> decRoot = declarationRoot();
     std::unique_ptr<Node> statementRoot = compoundStatement();
@@ -649,21 +680,28 @@ std::unique_ptr<Node> Parser::declarationRoot() {
 std::vector<std::unique_ptr<Node>> Parser::declarationList() {
     std::vector<std::unique_ptr<Node>> list;
 
-    while(currentToken->tokenType == TokenType::VARIABLE) {
-        std::vector<std::unique_ptr<Node>> varListResult = varList();
-        eat(TokenType::COLON);
-        std::shared_ptr<Token> typeToken = currentToken;
-        if (currentToken->tokenType == TokenType::INTEGER) {
-            eat(TokenType::INTEGER);
+    while(currentToken->tokenType == TokenType::VARIABLE
+    || currentToken->tokenType == TokenType::PROCEDURE) {
+        if (currentToken->tokenType == TokenType::VARIABLE) {
+            std::vector<std::unique_ptr<Node>> varListResult = varList();
+            eat(TokenType::COLON);
+            std::shared_ptr<Token> typeToken = currentToken;
+            if (currentToken->tokenType == TokenType::INTEGER) {
+                eat(TokenType::INTEGER);
+            }
+            else {
+                eat(TokenType::REAL);
+            }
+            eat(TokenType::SEMI);
+    
+            for (auto &varNode : varListResult) {
+                std::unique_ptr<VarDeclaration> varDecNode = std::make_unique<VarDeclaration>(std::move(varNode), typeToken->tokenType);
+                list.push_back(std::move(varDecNode));
+            }
         }
         else {
-            eat(TokenType::REAL);
-        }
-        eat(TokenType::SEMI);
-
-        for (auto &varNode : varListResult) {
-            std::unique_ptr<VarDeclaration> varDecNode = std::make_unique<VarDeclaration>(std::move(varNode), typeToken->tokenType);
-            list.push_back(std::move(varDecNode));
+            std::unique_ptr<Node> procedureNode = procedure();
+            list.push_back(std::move(procedureNode));
         }
     }
 
@@ -1046,6 +1084,13 @@ class PrintVisitor: public Visitor {
             node->compoundStatement->accept(this);
             --level;
             print_with_tabs(level, "");
+            node->print();
+        }
+        void visitProcedure(Procedure *node) {
+            ++level;
+            node->block->accept(this);
+            --level;
+            print_with_tabs(level,"");
             node->print();
         }
         void visitProgramNode(ProgramNode *node) {
