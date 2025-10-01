@@ -178,6 +178,7 @@ class SymbolTable {
 class Visitor {
     public:
         Visitor() {};
+        virtual ~Visitor() {};
         virtual void visitNumberNode(NumberNode *node) {};
         virtual void visitBinaryOp(BinaryOp *node) {};
         virtual void visitUnaryOp(UnaryOp *node) {};
@@ -194,6 +195,7 @@ class Visitor {
 class Node {
     public:
         Node() {};
+        virtual ~Node() {};
         Node(Node *node) {};
         virtual void accept(Visitor *visitor) = 0;
         virtual void print() = 0;
@@ -408,7 +410,7 @@ class ProgramNode: public Node {
         std::shared_ptr<Token> programName;
         std::unique_ptr<Node> block;
 
-        ProgramNode(std::shared_ptr<Token> programName, std::unique_ptr<Node> block) {
+        ProgramNode(std::shared_ptr<Token> programName, std::unique_ptr<Node> &&block) {
             this->programName = programName;
             this->block = std::move(block);
         }
@@ -821,6 +823,26 @@ class SymTableBuilder: public Visitor {
             }
         }
 
+        void visitUnaryOp(UnaryOp *node) override {
+            node->factor->accept(this);
+        }
+
+        void visitBinaryOp(BinaryOp *node) override {
+            node->left->accept(this);
+            node->right->accept(this);
+        }
+
+        void visitAssignStatement(AssignStatement *node) override {
+            node->left->accept(this);
+            node->right->accept(this);
+        }
+
+        void visitCompoundStatement(CompoundStatement *node) override {
+            for (auto &child : node->statementList) {
+                child->accept(this);
+            }
+        }
+
         void visitVarDeclaration(VarDeclaration *node) override {
             VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
@@ -897,7 +919,7 @@ class EvalVisitor: public Visitor {
         // only for right-hand side evaluation (math expressions)
         void visitVariableNode(VariableNode *node) override {
             if (varValues.find(node->name) == varValues.end()) {
-                error("Variable \"" +node->name+ "\" was not not initialized");
+                error("Variable \"" +node->name+ "\" was not initialized");
                 return;
             }
             nodeValues[node] = varValues[node->name];
@@ -1055,7 +1077,7 @@ Interpreter::Interpreter(const std::string &aText) {
     root = parser->parse();
 }
 void Interpreter::error(const std::string &message) {
-    throw std::runtime_error("Interpreter error: " +message);
+    throw std::runtime_error(message);
 }
 void Interpreter::interpret() {
     std::unique_ptr<EvalVisitor> evalVisitor = std::make_unique<EvalVisitor>();
@@ -1149,8 +1171,8 @@ int main(int argc, char **argv) {
         interpreter->build_symbol_table();
         interpreter->interpret();
         interpreter->print_global_scope();
-        std::cout << "Done" << std::endl;
-    }
+        std::cout << "Done\n";
+    } // interpreter's root has a mismatched deletion size line 625
     catch (std::runtime_error e) {
         std::cerr << e.what() << std::endl;
     }
