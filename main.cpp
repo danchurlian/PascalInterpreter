@@ -819,7 +819,7 @@ class SymTableBuilder: public Visitor {
         void visitVariableNode(VariableNode *node) override {
             std::string name = node->name;
             if (symTable->lookup(name) == nullptr) {
-                throw std::runtime_error("SymTableBuilder found undeclared variable");
+                throw std::runtime_error("SymTableBuilder found undeclared variable \"" +name+ "\"");
             }
         }
 
@@ -860,6 +860,7 @@ class SymTableBuilder: public Visitor {
 
         void visitBlock(Block *node) override {
             node->decRoot->accept(this);
+            node->compoundStatement->accept(this);
         }
 
         void visitProgramNode(ProgramNode *node) override {
@@ -927,10 +928,10 @@ class EvalVisitor: public Visitor {
         void visitAssignStatement(AssignStatement *node) {
             VariableNode *leftNode = dynamic_cast<VariableNode*>(node->left.get());
             std::string varName = leftNode->name;
-            if (varValues.find(varName) == varValues.end()) {
-                error("Variable \"" +varName+ "\" was not declared");
-                return;
-            }
+            // if (varValues.find(varName) == varValues.end()) {
+            //     error("Variable \"" +varName+ "\" was not declared");
+            //     return;
+            // }
             node->right->accept(this);
             int rightValue = nodeValues[node->right.get()];
             varValues[varName] = rightValue;

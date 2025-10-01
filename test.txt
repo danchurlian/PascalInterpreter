@@ -1,9 +1,8 @@
 program Test;
 var
-    a,b : INTEGER;
+    a,b,c : INTEGER;
 begin
     a := 6;
     b := 7;
-    {this is a comment.}
-    a := (b + 2);
+    c := (a + b);
 end.
