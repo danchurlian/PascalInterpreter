@@ -398,10 +398,12 @@ class Block: public Node {
     public:
         std::unique_ptr<Node> decRoot;
         std::unique_ptr<Node> compoundStatement;
+        std::vector<std::unique_ptr<Node>> procedures;
 
-        Block(std::unique_ptr<Node> decRoot, std::unique_ptr<Node> compoundStatement) {
+        Block(std::unique_ptr<Node> decRoot, std::unique_ptr<Node> compoundStatement, std::vector<std::unique_ptr<Node>>&& procedures) {
             this->decRoot = std::move(decRoot);
             this->compoundStatement = std::move(compoundStatement); 
+            this->procedures = std::move(procedures);
         }
         void accept(Visitor *visitor) override {
             visitor->visitBlock(this);
@@ -599,6 +601,7 @@ class Parser {
         std::shared_ptr<Token> program_name();
         std::unique_ptr<Node> procedure();
         std::unique_ptr<Node> block();
+        std::vector<std::unique_ptr<Node>> procedureList();
         std::unique_ptr<Node> declarationRoot();
         std::vector<std::unique_ptr<Node>> declarationList();
         std::vector<std::unique_ptr<Node>> varList();
@@ -665,8 +668,17 @@ std::unique_ptr<Node> Parser::procedure() {
 }
 std::unique_ptr<Node> Parser::block() {
     std::unique_ptr<Node> decRoot = declarationRoot();
+    std::vector<std::unique_ptr<Node>> procedures = procedureList();
     std::unique_ptr<Node> statementRoot = compoundStatement();
-    return std::make_unique<Block>(std::move(decRoot), std::move(statementRoot));
+    return std::make_unique<Block>(std::move(decRoot), std::move(statementRoot), std::move(procedures));
+}
+std::vector<std::unique_ptr<Node>> Parser::procedureList() {
+    std::vector<std::unique_ptr<Node>> list;
+    while(currentToken->tokenType == TokenType::PROCEDURE) {
+        std::unique_ptr<Node> proc = procedure();
+        list.push_back(std::move(proc));
+    }
+    return list;
 }
 std::unique_ptr<Node> Parser::declarationRoot() {
     if (currentToken->tokenType == TokenType::VAR) {
@@ -680,28 +692,21 @@ std::unique_ptr<Node> Parser::declarationRoot() {
 std::vector<std::unique_ptr<Node>> Parser::declarationList() {
     std::vector<std::unique_ptr<Node>> list;
 
-    while(currentToken->tokenType == TokenType::VARIABLE
-    || currentToken->tokenType == TokenType::PROCEDURE) {
-        if (currentToken->tokenType == TokenType::VARIABLE) {
-            std::vector<std::unique_ptr<Node>> varListResult = varList();
-            eat(TokenType::COLON);
-            std::shared_ptr<Token> typeToken = currentToken;
-            if (currentToken->tokenType == TokenType::INTEGER) {
-                eat(TokenType::INTEGER);
-            }
-            else {
-                eat(TokenType::REAL);
-            }
-            eat(TokenType::SEMI);
-    
-            for (auto &varNode : varListResult) {
-                std::unique_ptr<VarDeclaration> varDecNode = std::make_unique<VarDeclaration>(std::move(varNode), typeToken->tokenType);
-                list.push_back(std::move(varDecNode));
-            }
+    while(currentToken->tokenType == TokenType::VARIABLE) {
+        std::vector<std::unique_ptr<Node>> varListResult = varList();
+        eat(TokenType::COLON);
+        std::shared_ptr<Token> typeToken = currentToken;
+        if (currentToken->tokenType == TokenType::INTEGER) {
+            eat(TokenType::INTEGER);
         }
         else {
-            std::unique_ptr<Node> procedureNode = procedure();
-            list.push_back(std::move(procedureNode));
+            eat(TokenType::REAL);
+        }
+        eat(TokenType::SEMI);
+
+        for (auto &varNode : varListResult) {
+            std::unique_ptr<VarDeclaration> varDecNode = std::make_unique<VarDeclaration>(std::move(varNode), typeToken->tokenType);
+            list.push_back(std::move(varDecNode));
         }
     }
 
@@ -1081,6 +1086,9 @@ class PrintVisitor: public Visitor {
         void visitBlock(Block *node) {
             ++level;
             node->decRoot->accept(this);
+            for (auto &procedure : node->procedures) {
+                procedure->accept(this);
+            }
             node->compoundStatement->accept(this);
             --level;
             print_with_tabs(level, "");
