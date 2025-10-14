@@ -1,15 +1,10 @@
 program Test;
 var
-    a,b,c : INTEGER;
+    x : INTEGER;
+    procedure p1(a,b : INTEGER; c : REAL; d : INTEGER;);
+        begin
 
-    procedure p1;
-    var
-        d : INTEGER;
-    begin
-        d := 5;
-    end;
+        end;
 begin
-    a := 6;
-    b := 7;
-    c := (a + b);
+    x := 5;
 end.

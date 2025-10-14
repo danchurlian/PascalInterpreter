@@ -108,6 +108,7 @@ class TypeNode;
 class VarDeclaration;
 class DeclarationRoot;
 class Procedure;
+class ParamDeclaration;
 class Block;
 class ProgramNode;
 
@@ -150,8 +151,11 @@ class BuiltinTypeSymbol: public Symbol {
 class SymbolTable {
     private:
         std::unordered_map<std::string, std::shared_ptr<Symbol>> map;
+        int level;
+        const std::string name; // global or procedure name
+        // symbols would only be inside this map
     public:
-        SymbolTable() {
+        SymbolTable(int level, const std::string &name) : level(level), name(name) {
             define(std::make_unique<BuiltinTypeSymbol>("INTEGER"));
             define(std::make_unique<BuiltinTypeSymbol>("REAL"));
         };
@@ -168,6 +172,7 @@ class SymbolTable {
             return result;
         }
         void print() {
+            std::cout << "Scoped symbol table \nLevel: " << level << " | Name: " << name << "\n";
             for (auto &pair : map) {
                 std::cout << "Pair: { " << pair.first;
                 std::cout << ", ";
@@ -192,6 +197,7 @@ class Visitor {
         virtual void visitEmptyStatement(EmptyStatement *node) {};
         virtual void visitVarDeclaration(VarDeclaration *node) {};
         virtual void visitDeclarationRoot(DeclarationRoot *node) {};
+        virtual void visitParamDeclaration(ParamDeclaration *node) {};
         virtual void visitProcedure(Procedure *node) {};
         virtual void visitBlock(Block *node) {};
         virtual void visitProgramNode(ProgramNode *node) {};
@@ -279,7 +285,7 @@ void UnaryOp::accept(Visitor *visitor) {
 void UnaryOp::print() {
     std::cout << "UnaryOp: { Type: " << tokenType_tostring(op->tokenType) << " }\n";
 }
-
+// Does not store a type
 class VariableNode: public Node {
     public:
         std::shared_ptr<Token> variableToken;
@@ -412,13 +418,36 @@ class Block: public Node {
             std::cout << "Block\n";
         }
 };
+// Parameter variable declaration
+class ParamDeclaration: public Node {
+    public:
+        std::unique_ptr<Node> varNode;
+        std::unique_ptr<Node> typeNode;
+        ParamDeclaration(std::unique_ptr<Node> &&varNode, TokenType tokenType) {
+            this->varNode = std::move(varNode);
+            this->typeNode = std::make_unique<TypeNode>(tokenType);
+        }
+        void accept(Visitor *visitor) override {
+            visitor->visitParamDeclaration(this);
+        }
+        void print() override {
+            // "a : INTEGER"
+            std::cout << "PARAM -> ";
+            VariableNode *varConv = dynamic_cast<VariableNode*>(varNode.get());
+            TypeNode *typeConv = dynamic_cast<TypeNode*>(typeNode.get());
+            std::cout << varConv->name << " : " << tokenType_tostring(typeConv->type->tokenType) << "\n";
+        }
+};
 class Procedure: public Node {
     public:
         std::shared_ptr<Token> id;
         std::unique_ptr<Node> block;
-        Procedure(std::shared_ptr<Token> id, std::unique_ptr<Node>&& block) {
+        std::vector<std::unique_ptr<Node>> params;
+
+        Procedure(std::shared_ptr<Token> id, std::unique_ptr<Node>&& block, std::vector<std::unique_ptr<Node>> params) {
             this->id = id;
             this->block = std::move(block);
+            this->params = std::move(params);
         }
         void print() override {
             std::cout << "Procedure \"" << id->value << "\"\n";
@@ -426,7 +455,6 @@ class Procedure: public Node {
         void accept(Visitor *visitor) override {
             visitor->visitProcedure(this);
         }
-
 };
 class ProgramNode: public Node {
     public:
@@ -600,6 +628,8 @@ class Parser {
         std::unique_ptr<Node> program(); 
         std::shared_ptr<Token> program_name();
         std::unique_ptr<Node> procedure();
+        std::vector<std::unique_ptr<Node>> paramList();
+        std::unique_ptr<Node> paramDecLine();
         std::unique_ptr<Node> block();
         std::vector<std::unique_ptr<Node>> procedureList();
         std::unique_ptr<Node> declarationRoot();
@@ -661,10 +691,54 @@ std::unique_ptr<Node> Parser::procedure() {
     eat(TokenType::PROCEDURE);
     std::shared_ptr<Token> name = currentToken;
     eat(TokenType::VARIABLE);
+
+    std::vector<std::unique_ptr<Node>> params;
+
+    if (currentToken->tokenType == TokenType::LPAREN) {
+        eat(TokenType::LPAREN);
+        params = paramList();
+        eat(TokenType::RPAREN);
+    }
+
     eat(TokenType::SEMI);
     std::unique_ptr<Node> blockNode = block();
     eat(TokenType::SEMI);
-    return std::make_unique<Procedure>(name, std::move(blockNode));
+    return std::make_unique<Procedure>(name, std::move(blockNode), std::move(params));
+}
+std::vector<std::unique_ptr<Node>> Parser::paramList() {
+    std::vector<std::unique_ptr<Node>> list;
+
+    while (currentToken->tokenType == TokenType::VARIABLE) {
+        auto decList = declarationList();
+        list.insert(list.end(), std::make_move_iterator(decList.begin()), std::make_move_iterator(decList.end()));
+    }
+    
+    // list.push_back(std::move(paramDecLine()));
+
+    // while (currentToken->tokenType == TokenType::COMMA) {
+    //     eat(TokenType::COMMA);
+    //     std::unique_ptr<Node> newNode = paramDecLine();
+    //     list.push_back(std::move(newNode));
+    // }
+
+
+    return list;
+}
+// variable (COMMA variable)* COLON type
+std::unique_ptr<Node> Parser::paramDecLine() {
+    std::shared_ptr<Token> name = currentToken;
+    eat(TokenType::VARIABLE);
+    eat(TokenType::COLON);
+    TokenType decType = currentToken->tokenType;
+    switch (currentToken->tokenType) {
+        case TokenType::REAL:
+            eat(TokenType::REAL);
+            break;
+        default:
+            eat(TokenType::INTEGER);
+    }
+    std::unique_ptr<Node> varNode = std::make_unique<VariableNode>(name);
+    return std::make_unique<ParamDeclaration>(std::move(varNode), decType);
 }
 std::unique_ptr<Node> Parser::block() {
     std::unique_ptr<Node> decRoot = declarationRoot();
@@ -689,6 +763,7 @@ std::unique_ptr<Node> Parser::declarationRoot() {
     return std::make_unique<DeclarationRoot>();
 }
 // only runs when there is at least a variable to be declared
+// one line: var (COMMA var)* COLON (INTEGER | REAL)
 std::vector<std::unique_ptr<Node>> Parser::declarationList() {
     std::vector<std::unique_ptr<Node>> list;
 
@@ -712,6 +787,7 @@ std::vector<std::unique_ptr<Node>> Parser::declarationList() {
 
     return list;
 }
+// list of variable nodes
 std::vector<std::unique_ptr<Node>> Parser::varList() {
     std::vector<std::unique_ptr<Node>> list;
     list.push_back(std::make_unique<VariableNode>(currentToken));
@@ -846,14 +922,20 @@ std::unique_ptr<Node> Parser::parse() {
 
 // ------------------------------------------------------------------------
 
-class SymTableBuilder: public Visitor {
+class SemanticAnalyzer: public Visitor {
     private:
-        std::unique_ptr<SymbolTable> symTable;
+        std::shared_ptr<SymbolTable> symTable;
 
     public:
-        SymTableBuilder() {
-            symTable = std::make_unique<SymbolTable>();
+        SemanticAnalyzer() {
+            symTable = std::make_shared<SymbolTable>(1, "global");
         };
+
+        // Should only be called by interpreter
+        // Should be called when this visitor end of life
+        std::shared_ptr<SymbolTable> transferSymTable() {
+            return symTable;
+        }
 
         void print_table() {
             symTable->print();
@@ -862,7 +944,7 @@ class SymTableBuilder: public Visitor {
         void visitVariableNode(VariableNode *node) override {
             std::string name = node->name;
             if (symTable->lookup(name) == nullptr) {
-                throw std::runtime_error("SymTableBuilder found undeclared variable \"" +name+ "\"");
+                throw std::runtime_error("SemanticAnalyzer found undeclared variable \"" +name+ "\"");
             }
         }
 
@@ -1094,9 +1176,16 @@ class PrintVisitor: public Visitor {
             print_with_tabs(level, "");
             node->print();
         }
+        void visitParamDeclaration(ParamDeclaration *node) {
+            print_with_tabs(level, "");
+            node->print();
+        }
         void visitProcedure(Procedure *node) {
             ++level;
             node->block->accept(this);
+            for (auto &dec : node->params) {
+                dec->accept(this);
+            }
             --level;
             print_with_tabs(level,"");
             node->print();
@@ -1148,7 +1237,7 @@ void Interpreter::print_postorder() {
     root->accept(printVisitor.get());
 }
 void Interpreter::build_symbol_table() {
-    std::unique_ptr<SymTableBuilder> builder = std::make_unique<SymTableBuilder>();
+    std::unique_ptr<SemanticAnalyzer> builder = std::make_unique<SemanticAnalyzer>();
     try {
         root->accept(builder.get());
         builder->print_table();
