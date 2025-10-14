@@ -418,7 +418,7 @@ class Block: public Node {
             std::cout << "Block\n";
         }
 };
-// Parameter variable declaration
+
 class ParamDeclaration: public Node {
     public:
         std::unique_ptr<Node> varNode;
@@ -629,7 +629,7 @@ class Parser {
         std::shared_ptr<Token> program_name();
         std::unique_ptr<Node> procedure();
         std::vector<std::unique_ptr<Node>> paramList();
-        std::unique_ptr<Node> paramDecLine();
+        std::vector<std::unique_ptr<Node>> paramDecLine();
         std::unique_ptr<Node> block();
         std::vector<std::unique_ptr<Node>> procedureList();
         std::unique_ptr<Node> declarationRoot();
@@ -687,6 +687,7 @@ std::shared_ptr<Token> Parser::program_name() {
     eat(TokenType::VARIABLE);
     return name;
 }
+// PROCEDURE VARIABLE (LPAREN PARAM_LIST RPAREN)? SEMI BLOCK SEMI;
 std::unique_ptr<Node> Parser::procedure() {
     eat(TokenType::PROCEDURE);
     std::shared_ptr<Token> name = currentToken;
@@ -703,32 +704,34 @@ std::unique_ptr<Node> Parser::procedure() {
     eat(TokenType::SEMI);
     std::unique_ptr<Node> blockNode = block();
     eat(TokenType::SEMI);
-    return std::make_unique<Procedure>(name, std::move(blockNode), std::move(params));
+    return std::make_unique<Procedure>(
+        name, std::move(blockNode), std::move(params));
 }
+// paramDecLine (SEMI paramDecLine)*
+// parse through all param arguments between LPAREN and RPAREN
 std::vector<std::unique_ptr<Node>> Parser::paramList() {
     std::vector<std::unique_ptr<Node>> list;
-
-    while (currentToken->tokenType == TokenType::VARIABLE) {
-        auto decList = declarationList();
-        list.insert(list.end(), std::make_move_iterator(decList.begin()), std::make_move_iterator(decList.end()));
-    }
     
-    // list.push_back(std::move(paramDecLine()));
+    std::vector<std::unique_ptr<Node>> lineDecList = paramDecLine();
+    list.insert(list.end(), 
+        std::make_move_iterator(lineDecList.begin()), 
+        std::make_move_iterator(lineDecList.end()));
 
-    // while (currentToken->tokenType == TokenType::COMMA) {
-    //     eat(TokenType::COMMA);
-    //     std::unique_ptr<Node> newNode = paramDecLine();
-    //     list.push_back(std::move(newNode));
-    // }
-
-
+    if (currentToken->tokenType == TokenType::SEMI) {
+        eat(TokenType::SEMI);
+        std::vector<std::unique_ptr<Node>> nextList = paramList();
+        list.insert(list.end(),
+            std::make_move_iterator(nextList.begin()),
+            std::make_move_iterator(nextList.end())
+        );
+    }
     return list;
 }
 // variable (COMMA variable)* COLON type
-std::unique_ptr<Node> Parser::paramDecLine() {
-    std::shared_ptr<Token> name = currentToken;
-    eat(TokenType::VARIABLE);
+std::vector<std::unique_ptr<Node>> Parser::paramDecLine() {
+    std::vector<std::unique_ptr<Node>> varsUsing = varList();
     eat(TokenType::COLON);
+
     TokenType decType = currentToken->tokenType;
     switch (currentToken->tokenType) {
         case TokenType::REAL:
@@ -737,8 +740,13 @@ std::unique_ptr<Node> Parser::paramDecLine() {
         default:
             eat(TokenType::INTEGER);
     }
-    std::unique_ptr<Node> varNode = std::make_unique<VariableNode>(name);
-    return std::make_unique<ParamDeclaration>(std::move(varNode), decType);
+    std::vector<std::unique_ptr<Node>> decList;
+    for (auto &var : varsUsing) {
+        std::unique_ptr<Node> paramDec = 
+            std::make_unique<ParamDeclaration>(std::move(var), decType);
+        decList.push_back(std::move(paramDec));
+    }
+    return decList;
 }
 std::unique_ptr<Node> Parser::block() {
     std::unique_ptr<Node> decRoot = declarationRoot();
@@ -1184,7 +1192,8 @@ class PrintVisitor: public Visitor {
             ++level;
             node->block->accept(this);
             for (auto &dec : node->params) {
-                dec->accept(this);
+                if (dec != nullptr)
+                    dec->accept(this);
             }
             --level;
             print_with_tabs(level,"");
@@ -1315,7 +1324,7 @@ int main(int argc, char **argv) {
         interpreter->interpret();
         interpreter->print_global_scope();
         std::cout << "Done\n";
-    } // interpreter's root has a mismatched deletion size line 625
+    }
     catch (std::runtime_error e) {
         std::cerr << e.what() << std::endl;
     }

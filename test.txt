@@ -1,7 +1,7 @@
 program Test;
 var
     x : INTEGER;
-    procedure p1(a,b : INTEGER; c : REAL; d : INTEGER;);
+    procedure p1(a,b : INTEGER; c : REAL; d : INTEGER);
         begin
 
         end;
