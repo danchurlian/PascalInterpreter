@@ -1,9 +1,12 @@
 program Test;
 var
     x, y : INTEGER;
-    procedure p1(a,b : INTEGER; c : REAL; d : INTEGER);
+    procedure p1;
         begin
             as := 2;
+        end;
+    procedure p2;
+        begin
         end;
 begin
     y := 2;

@@ -129,6 +129,14 @@ class Symbol {
         virtual void print() = 0;
 };
 
+class ProcedureSymbol: public Symbol {
+    public:
+        ProcedureSymbol(const std::string &name) : Symbol(name) {};
+        void print() override {
+            std::cout << "Procedure symbol: " << name;
+        }
+};
+
 class VarSymbol: public Symbol {
     public:
         VarSymbol(const std::string &name, std::shared_ptr<Symbol> type) : Symbol(name, type) {};
@@ -160,7 +168,7 @@ class SymbolTable {
             define(std::make_unique<BuiltinTypeSymbol>("REAL"));
         };
         // for variable symbols, their type symbols will point to the type symbols in the map.
-        void define(std::shared_ptr<Symbol> &&sym) {
+        void define(std::shared_ptr<Symbol> sym) {
             std::string name = sym->name;
             map[name] = sym;
         };
@@ -986,15 +994,28 @@ class SemanticAnalyzer: public Visitor {
             symTable->define(varSymbol);
         }
 
-        void visitDeclarationRoot(DeclarationRoot *node) override {
-            for (auto &child : node->declarations) {
-                child->accept(this);
+        // void visitDeclarationRoot(DeclarationRoot *node) override {
+        //     for (auto &child : node->declarations) {
+        //         child->accept(this);
+        //     }
+        // }
+
+        void visitProcedure(Procedure *node) {
+            const std::string name = node->id->value;
+            if (symTable->lookup(name)) {
+                throw std::runtime_error("SemanticAnalyzer found duplicate procedure \"" +name+ "\"");
+            } else {
+                std::shared_ptr<Symbol> procSym = std::make_shared<ProcedureSymbol>(name);
+                symTable->define(procSym);
             }
         }
 
         void visitBlock(Block *node) override {
             for (auto &varDeclaration : node->varDeclarations) {
                 varDeclaration->accept(this);
+            }
+            for (auto &procedure : node->procedures) {
+                procedure->accept(this);
             }
             node->compoundStatement->accept(this);
         }
