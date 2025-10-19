@@ -1,10 +1,11 @@
 program Test;
 var
-    x : INTEGER;
+    x, y : INTEGER;
     procedure p1(a,b : INTEGER; c : REAL; d : INTEGER);
         begin
-
+            as := 2;
         end;
 begin
+    y := 2;
     x := 5;
 end.

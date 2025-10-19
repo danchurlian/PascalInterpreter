@@ -174,8 +174,8 @@ class SymbolTable {
         void print() {
             std::cout << "Scoped symbol table \nLevel: " << level << " | Name: " << name << "\n";
             for (auto &pair : map) {
-                std::cout << "Pair: { " << pair.first;
-                std::cout << ", ";
+                std::cout << "Pair: { \"" << pair.first;
+                std::cout << "\" --> ";
                 pair.second->print();
                 std::cout << " }\n";
             }
@@ -383,7 +383,7 @@ class VarDeclaration: public Node {
             // "a : INTEGER"
             VariableNode *varConv = dynamic_cast<VariableNode*>(varNode.get());
             TypeNode *typeConv = dynamic_cast<TypeNode*>(typeNode.get());
-            std::cout << varConv->name << " : " << tokenType_tostring(typeConv->type->tokenType) << "\n";
+            std::cout << "VAR -> " << varConv->name << " : " << tokenType_tostring(typeConv->type->tokenType) << "\n";
         }
 };
 class DeclarationRoot: public Node {
@@ -402,14 +402,17 @@ class DeclarationRoot: public Node {
 };
 class Block: public Node {
     public:
-        std::unique_ptr<Node> decRoot;
+        std::vector<std::unique_ptr<Node>> varDeclarations; // replace decRoot;
         std::unique_ptr<Node> compoundStatement;
         std::vector<std::unique_ptr<Node>> procedures;
 
-        Block(std::unique_ptr<Node> decRoot, std::unique_ptr<Node> compoundStatement, std::vector<std::unique_ptr<Node>>&& procedures) {
-            this->decRoot = std::move(decRoot);
+        Block( 
+            std::unique_ptr<Node> compoundStatement, std::vector<std::unique_ptr<Node>>&& procedures,
+            std::vector<std::unique_ptr<Node>>&& varDeclarations
+        ) {
             this->compoundStatement = std::move(compoundStatement); 
             this->procedures = std::move(procedures);
+            this->varDeclarations = std::move(varDeclarations);
         }
         void accept(Visitor *visitor) override {
             visitor->visitBlock(this);
@@ -442,12 +445,12 @@ class Procedure: public Node {
     public:
         std::shared_ptr<Token> id;
         std::unique_ptr<Node> block;
-        std::vector<std::unique_ptr<Node>> params;
+        std::vector<std::unique_ptr<Node>> paramDeclarations;
 
         Procedure(std::shared_ptr<Token> id, std::unique_ptr<Node>&& block, std::vector<std::unique_ptr<Node>> params) {
             this->id = id;
             this->block = std::move(block);
-            this->params = std::move(params);
+            this->paramDeclarations = std::move(params);
         }
         void print() override {
             std::cout << "Procedure \"" << id->value << "\"\n";
@@ -472,9 +475,6 @@ class ProgramNode: public Node {
             std::cout << "Program \"" << programName->value << ".pas\" \n";
         }
 };
-
-
-
 
 
 // --------------------------------------------------------------
@@ -632,7 +632,6 @@ class Parser {
         std::vector<std::unique_ptr<Node>> paramDecLine();
         std::unique_ptr<Node> block();
         std::vector<std::unique_ptr<Node>> procedureList();
-        std::unique_ptr<Node> declarationRoot();
         std::vector<std::unique_ptr<Node>> declarationList();
         std::vector<std::unique_ptr<Node>> varList();
         std::unique_ptr<Node> compoundStatement();
@@ -693,11 +692,11 @@ std::unique_ptr<Node> Parser::procedure() {
     std::shared_ptr<Token> name = currentToken;
     eat(TokenType::VARIABLE);
 
-    std::vector<std::unique_ptr<Node>> params;
+    std::vector<std::unique_ptr<Node>> paramDeclarations;
 
     if (currentToken->tokenType == TokenType::LPAREN) {
         eat(TokenType::LPAREN);
-        params = paramList();
+        paramDeclarations = paramList();
         eat(TokenType::RPAREN);
     }
 
@@ -705,7 +704,7 @@ std::unique_ptr<Node> Parser::procedure() {
     std::unique_ptr<Node> blockNode = block();
     eat(TokenType::SEMI);
     return std::make_unique<Procedure>(
-        name, std::move(blockNode), std::move(params));
+        name, std::move(blockNode), std::move(paramDeclarations));
 }
 // paramDecLine (SEMI paramDecLine)*
 // parse through all param arguments between LPAREN and RPAREN
@@ -749,10 +748,16 @@ std::vector<std::unique_ptr<Node>> Parser::paramDecLine() {
     return decList;
 }
 std::unique_ptr<Node> Parser::block() {
-    std::unique_ptr<Node> decRoot = declarationRoot();
+    std::vector<std::unique_ptr<Node>> declarations;
+    if (currentToken->tokenType == TokenType::VAR) {
+        eat(TokenType::VAR);
+        declarations = declarationList();
+    }
     std::vector<std::unique_ptr<Node>> procedures = procedureList();
     std::unique_ptr<Node> statementRoot = compoundStatement();
-    return std::make_unique<Block>(std::move(decRoot), std::move(statementRoot), std::move(procedures));
+
+    return std::make_unique<Block>(std::move(statementRoot), 
+        std::move(procedures), std::move(declarations));
 }
 std::vector<std::unique_ptr<Node>> Parser::procedureList() {
     std::vector<std::unique_ptr<Node>> list;
@@ -762,16 +767,6 @@ std::vector<std::unique_ptr<Node>> Parser::procedureList() {
     }
     return list;
 }
-std::unique_ptr<Node> Parser::declarationRoot() {
-    if (currentToken->tokenType == TokenType::VAR) {
-        eat(TokenType::VAR);
-        std::vector<std::unique_ptr<Node>> list = declarationList();
-        return std::make_unique<DeclarationRoot>(list);
-    }
-    return std::make_unique<DeclarationRoot>();
-}
-// only runs when there is at least a variable to be declared
-// one line: var (COMMA var)* COLON (INTEGER | REAL)
 std::vector<std::unique_ptr<Node>> Parser::declarationList() {
     std::vector<std::unique_ptr<Node>> list;
 
@@ -978,8 +973,14 @@ class SemanticAnalyzer: public Visitor {
 
         void visitVarDeclaration(VarDeclaration *node) override {
             VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
+            const std::string varName = varNode->name;
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
-            std::string typeName = tokenType_tostring(typeNode->type->tokenType);
+            const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
+
+            if (symTable->lookup(varNode->name)) {
+                throw std::runtime_error("SemanticAnalyzer found duplicate variable \"" +varNode->name+ "\"");
+            }
+
             std::shared_ptr<Symbol> typeSym = symTable->lookup(typeName);
             std::shared_ptr<VarSymbol> varSymbol = std::make_shared<VarSymbol>(varNode->name, typeSym);
             symTable->define(varSymbol);
@@ -992,7 +993,9 @@ class SemanticAnalyzer: public Visitor {
         }
 
         void visitBlock(Block *node) override {
-            node->decRoot->accept(this);
+            for (auto &varDeclaration : node->varDeclarations) {
+                varDeclaration->accept(this);
+            }
             node->compoundStatement->accept(this);
         }
 
@@ -1087,7 +1090,9 @@ class EvalVisitor: public Visitor {
             }
         }
         void visitBlock(Block *node) {
-            node->decRoot->accept(this);
+            for (auto &varDeclaration : node->varDeclarations) {
+                varDeclaration->accept(this);
+            }
             node->compoundStatement->accept(this);
         }
         void visitProgramNode(ProgramNode *node) {
@@ -1175,9 +1180,11 @@ class PrintVisitor: public Visitor {
         }
         void visitBlock(Block *node) {
             ++level;
-            node->decRoot->accept(this);
             for (auto &procedure : node->procedures) {
                 procedure->accept(this);
+            }
+            for (auto &varDeclaration : node->varDeclarations) {
+                varDeclaration->accept(this);
             }
             node->compoundStatement->accept(this);
             --level;
@@ -1191,7 +1198,7 @@ class PrintVisitor: public Visitor {
         void visitProcedure(Procedure *node) {
             ++level;
             node->block->accept(this);
-            for (auto &dec : node->params) {
+            for (auto &dec : node->paramDeclarations) {
                 if (dec != nullptr)
                     dec->accept(this);
             }
