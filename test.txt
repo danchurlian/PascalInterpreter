@@ -1,14 +1,15 @@
 program Test;
 var
     x, y : INTEGER;
-    procedure p1;
+    procedure p1(a : INTEGER);
+        var
+            procedure p2(b : INTEGER);
+            begin
+            end;
         begin
-            as := 2;
-        end;
-    procedure p2;
-        begin
+            y := 3;
         end;
 begin
-    y := 2;
     x := 5;
+    y := 2;
 end.

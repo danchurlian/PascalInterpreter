@@ -936,10 +936,12 @@ std::unique_ptr<Node> Parser::parse() {
 class SemanticAnalyzer: public Visitor {
     private:
         std::shared_ptr<SymbolTable> symTable;
+        std::shared_ptr<SymbolTable> currentScope;
+        int currentLevel = 1;
 
     public:
         SemanticAnalyzer() {
-            symTable = std::make_shared<SymbolTable>(1, "global");
+            symTable = std::make_shared<SymbolTable>(currentLevel, "global");
         };
 
         // Should only be called by interpreter
@@ -1000,6 +1002,16 @@ class SemanticAnalyzer: public Visitor {
         //     }
         // }
 
+        void visitParamDeclaration(ParamDeclaration *node) {
+            VariableNode* varNode = dynamic_cast<VariableNode*>(node->varNode.get());
+            const std::string name = varNode->name;
+            TypeNode* typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
+            const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
+
+            std::shared_ptr<Symbol> paramSym = std::make_shared<VarSymbol>(name, symTable->lookup(typeName));
+            currentScope->define(paramSym);
+        }
+
         void visitProcedure(Procedure *node) {
             const std::string name = node->id->value;
             if (symTable->lookup(name)) {
@@ -1007,6 +1019,17 @@ class SemanticAnalyzer: public Visitor {
             } else {
                 std::shared_ptr<Symbol> procSym = std::make_shared<ProcedureSymbol>(name);
                 symTable->define(procSym);
+
+                ++currentLevel;
+                currentScope = std::make_shared<SymbolTable>(currentLevel, name);
+
+                for (auto &param : node->paramDeclarations) {
+                    param->accept(this);
+                }
+                node->block->accept(this);
+                currentScope->print();
+
+                --currentLevel;
             }
         }
 
