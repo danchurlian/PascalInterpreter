@@ -159,11 +159,16 @@ class BuiltinTypeSymbol: public Symbol {
 class SymbolTable {
     private:
         std::unordered_map<std::string, std::shared_ptr<Symbol>> map;
-        int level;
         const std::string name; // global or procedure name
+        
         // symbols would only be inside this map
     public:
-        SymbolTable(int level, const std::string &name) : level(level), name(name) {
+        std::shared_ptr<SymbolTable> enclosingScope;
+        int level;
+        
+
+        SymbolTable(int level, const std::string &name, const std::shared_ptr<SymbolTable> enclosingScope = nullptr) : level(level), name(name) {
+            this->enclosingScope = enclosingScope;
             define(std::make_unique<BuiltinTypeSymbol>("INTEGER"));
             define(std::make_unique<BuiltinTypeSymbol>("REAL"));
         };
@@ -937,11 +942,11 @@ class SemanticAnalyzer: public Visitor {
     private:
         std::shared_ptr<SymbolTable> symTable;
         std::shared_ptr<SymbolTable> currentScope;
-        int currentLevel = 1;
 
     public:
         SemanticAnalyzer() {
-            symTable = std::make_shared<SymbolTable>(currentLevel, "global");
+            symTable = std::make_shared<SymbolTable>(1, "global");
+            currentScope = symTable;
         };
 
         // Should only be called by interpreter
@@ -1013,15 +1018,15 @@ class SemanticAnalyzer: public Visitor {
         }
 
         void visitProcedure(Procedure *node) {
-            const std::string name = node->id->value;
-            if (symTable->lookup(name)) {
-                throw std::runtime_error("SemanticAnalyzer found duplicate procedure \"" +name+ "\"");
+            const std::string procedureName = node->id->value;
+            if (symTable->lookup(procedureName)) {
+                throw std::runtime_error("SemanticAnalyzer found duplicate procedure \"" +procedureName+ "\"");
             } else {
-                std::shared_ptr<Symbol> procSym = std::make_shared<ProcedureSymbol>(name);
+                std::shared_ptr<Symbol> procSym = std::make_shared<ProcedureSymbol>(procedureName);
                 symTable->define(procSym);
 
-                ++currentLevel;
-                currentScope = std::make_shared<SymbolTable>(currentLevel, name);
+                // increment the scope and change current scope
+                currentScope = std::make_shared<SymbolTable>(currentScope->level + 1, procedureName, currentScope);
 
                 for (auto &param : node->paramDeclarations) {
                     param->accept(this);
@@ -1029,7 +1034,8 @@ class SemanticAnalyzer: public Visitor {
                 node->block->accept(this);
                 currentScope->print();
 
-                --currentLevel;
+                // decrement the scope
+                currentScope = currentScope->enclosingScope;
             }
         }
 
@@ -1151,7 +1157,7 @@ class PrintVisitor: public Visitor {
         int level;
         void print_with_tabs(int numTabs, const std::string &msg) {
             for (int i = 0; i < numTabs; ++i) {
-                std::printf("    ");
+                std::printf("  ");
             }
             std::cout << msg;
         };

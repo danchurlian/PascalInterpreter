@@ -5,6 +5,7 @@ var
         var
             procedure p2(b : INTEGER);
             begin
+                y := 2;
             end;
         begin
             y := 3;
