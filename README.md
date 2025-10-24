@@ -1,3 +1,16 @@
-This is a simple PASCAL Interpreter in progress.
-This interpreter a Token class, Lexer class, a Parser class, and an Interpreter class.
-This program also contains an Abstract Syntax Tree data structure with Nodes representing different grammars.
+# My Basic Pascal Interpreter
+*By Daniel Chu*
+This is my version of a simple PASCAL Interpreter in progress. It is a self project that reflects studying programming interpreters through this guide here https://ruslanspivak.com/lsbasi-part1/, along with learning the language **C++**.
+
+Here are the current features of the program:
+- It can take in a txt file. Run the ```run``` executable along with the path to your input txt.file.
+- It prints out a representation of the abstract syntax tree architecture in a postorder traversal.
+- It prints out a series of symbol tables for each scope of the input program.
+- At the end, it prints out the contents of the global scope, containing all the local variable values.
+
+Here are some key features of the source code:
+- This interpreter contains a **Token** class, **Lexer** class, a **Parser** class, and an **Interpreter** class.
+- It also contains multiple visitors such as the **SemanticAnalyzer**, **PrintVisitor**, and **EvalVisitor**, which are applications of the *Node Visitor Pattern* designed to reduce heavy coupling with the Nodes.
+- This program also contains an **Abstract Syntax Tree** data structure with **Nodes** that result from parsing different *formal grammars*.
+
+Feedback is always appreciated!

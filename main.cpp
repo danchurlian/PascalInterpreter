@@ -943,6 +943,8 @@ class SemanticAnalyzer: public Visitor {
         std::shared_ptr<SymbolTable> symTable;
         std::shared_ptr<SymbolTable> currentScope;
 
+        // CREATE A BUILTINS SCOPE, WHICH WILL CONTAIN INTEGER AND REAL
+
     public:
         SemanticAnalyzer() {
             symTable = std::make_shared<SymbolTable>(1, "global");
@@ -961,7 +963,13 @@ class SemanticAnalyzer: public Visitor {
 
         void visitVariableNode(VariableNode *node) override {
             std::string name = node->name;
-            if (symTable->lookup(name) == nullptr) {
+            SymbolTable *curr = currentScope.get();
+            bool found = false;
+            while (curr != nullptr && !found) {
+                found = curr->lookup(name) != nullptr;
+                curr = curr->enclosingScope.get();
+            }
+            if (!found) {
                 throw std::runtime_error("SemanticAnalyzer found undeclared variable \"" +name+ "\"");
             }
         }
@@ -976,8 +984,8 @@ class SemanticAnalyzer: public Visitor {
         }
 
         void visitAssignStatement(AssignStatement *node) override {
-            node->left->accept(this);
             node->right->accept(this);
+            node->left->accept(this);
         }
 
         void visitCompoundStatement(CompoundStatement *node) override {
@@ -992,13 +1000,13 @@ class SemanticAnalyzer: public Visitor {
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
             const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
 
-            if (symTable->lookup(varNode->name)) {
+            if (currentScope->lookup(varNode->name)) {
                 throw std::runtime_error("SemanticAnalyzer found duplicate variable \"" +varNode->name+ "\"");
             }
 
-            std::shared_ptr<Symbol> typeSym = symTable->lookup(typeName);
+            std::shared_ptr<Symbol> typeSym = currentScope->lookup(typeName);
             std::shared_ptr<VarSymbol> varSymbol = std::make_shared<VarSymbol>(varNode->name, typeSym);
-            symTable->define(varSymbol);
+            currentScope->define(varSymbol);
         }
 
         // void visitDeclarationRoot(DeclarationRoot *node) override {

@@ -2,13 +2,11 @@ program Test;
 var
     x, y : INTEGER;
     procedure p1(a : INTEGER);
-        var
-            procedure p2(b : INTEGER);
-            begin
-                y := 2;
-            end;
         begin
-            y := 3;
+            a := 3;
+        end;
+    procedure p2(b : INTEGER);
+        begin
         end;
 begin
     x := 5;
