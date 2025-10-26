@@ -137,6 +137,14 @@ class ProcedureSymbol: public Symbol {
         }
 };
 
+class ProgramSymbol: public Symbol {
+    public:
+        ProgramSymbol(const std::string &name) : Symbol(name) {};
+        void print() override {
+            std::cout << "Program symbol: " << name;
+        }
+};
+
 class VarSymbol: public Symbol {
     public:
         VarSymbol(const std::string &name, std::shared_ptr<Symbol> type) : Symbol(name, type) {};
@@ -169,19 +177,25 @@ class SymbolTable {
 
         SymbolTable(int level, const std::string &name, const std::shared_ptr<SymbolTable> enclosingScope = nullptr) : level(level), name(name) {
             this->enclosingScope = enclosingScope;
-            define(std::make_unique<BuiltinTypeSymbol>("INTEGER"));
-            define(std::make_unique<BuiltinTypeSymbol>("REAL"));
+            if (level == 0) {
+                define(std::make_unique<BuiltinTypeSymbol>("INTEGER"));
+                define(std::make_unique<BuiltinTypeSymbol>("REAL"));
+            }
         };
         // for variable symbols, their type symbols will point to the type symbols in the map.
         void define(std::shared_ptr<Symbol> sym) {
             std::string name = sym->name;
             map[name] = sym;
         };
-        std::shared_ptr<Symbol> lookup(const std::string &symName) {
+        std::shared_ptr<Symbol> lookup(const std::string &symName, bool local=false) {
             std::shared_ptr<Symbol> result = nullptr;
             auto pair = map.find(symName);
             if (pair != map.end())
                 result = pair->second;
+            else {
+                if (!local && enclosingScope != nullptr)
+                    result = enclosingScope->lookup(symName, local);
+            }
             return result;
         }
         void print() {
@@ -942,12 +956,14 @@ class SemanticAnalyzer: public Visitor {
     private:
         std::shared_ptr<SymbolTable> symTable;
         std::shared_ptr<SymbolTable> currentScope;
+        std::shared_ptr<SymbolTable> builtinsScope;
 
         // CREATE A BUILTINS SCOPE, WHICH WILL CONTAIN INTEGER AND REAL
 
     public:
         SemanticAnalyzer() {
-            symTable = std::make_shared<SymbolTable>(1, "global");
+            builtinsScope = std::make_shared<SymbolTable>(0, "builtins");
+            symTable = std::make_shared<SymbolTable>(1, "global", builtinsScope);
             currentScope = symTable;
         };
 
@@ -958,18 +974,13 @@ class SemanticAnalyzer: public Visitor {
         }
 
         void print_table() {
-            symTable->print();
+            builtinsScope->print();
         }
 
         void visitVariableNode(VariableNode *node) override {
             std::string name = node->name;
             SymbolTable *curr = currentScope.get();
-            bool found = false;
-            while (curr != nullptr && !found) {
-                found = curr->lookup(name) != nullptr;
-                curr = curr->enclosingScope.get();
-            }
-            if (!found) {
+            if (currentScope->lookup(name) == nullptr) {
                 throw std::runtime_error("SemanticAnalyzer found undeclared variable \"" +name+ "\"");
             }
         }
@@ -1000,7 +1011,7 @@ class SemanticAnalyzer: public Visitor {
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
             const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
 
-            if (currentScope->lookup(varNode->name)) {
+            if (currentScope->lookup(varNode->name, true)) {
                 throw std::runtime_error("SemanticAnalyzer found duplicate variable \"" +varNode->name+ "\"");
             }
 
@@ -1058,7 +1069,11 @@ class SemanticAnalyzer: public Visitor {
         }
 
         void visitProgramNode(ProgramNode *node) override {
+            const std::string name = node->programName->value;
+            std::shared_ptr<ProgramSymbol> sym = std::make_shared<ProgramSymbol>(name);
+            builtinsScope->define(sym);
             node->block->accept(this);
+            currentScope->print();
         }
 };
 
