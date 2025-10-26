@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <exception>
 #include <typeinfo>
 #include <cctype>
@@ -68,6 +69,24 @@ const std::string tokenType_tostring(TokenType aTokenType) {
     return "Unknown";
 }
 
+enum class ErrorCode {
+    UNEXPECTED_TOKEN,
+    UNDECLARED_ID,
+    DUPLICATE_ID,
+    NONE,
+};
+const std::string error_tostring(ErrorCode errorType) {
+    switch (errorType) {
+        case ErrorCode::UNEXPECTED_TOKEN:
+        return "Unexpected token";
+        case ErrorCode::UNDECLARED_ID:
+        return "Undeclared identifier found";
+        case ErrorCode::DUPLICATE_ID:
+        return "Duplicate identifier found";
+    }
+    return "";
+}
+
 class Token {
     public:
         static std::unordered_map<std::string, TokenType> KEYWORDS;
@@ -76,6 +95,39 @@ class Token {
         Token(TokenType aTokenType, const std::string& aValue);
         void print();
 };
+// the base class
+class Error: public std::exception {
+    protected:
+        std::shared_ptr<Token> token;
+        ErrorCode code;
+        const std::string message;
+    public:
+    // what is error code used for?
+        Error(const std::string& message, std::shared_ptr<Token> token = nullptr, ErrorCode code = ErrorCode::NONE) : message(message) {
+            this->token = token;
+            this->code = code;
+        }
+        const char *what() const noexcept override {
+            std::string result = "Base error class";
+            return message.c_str();
+        }
+};
+
+// this will be thrown by the Lexer itself, just needs a message
+// since the Lexer builds the message by itself
+class LexerError: public Error {
+    public:
+        // Lexer: unexpected char c at (5:2)
+        LexerError(const std::string &message) 
+        : Error(message) {}
+
+        const char *what() const noexcept override {
+            return message.c_str();
+        }
+};
+
+// ---------------------------------------------------------------------
+
 std::unordered_map<std::string, TokenType> Token::KEYWORDS = {
     {"begin", TokenType::BEGIN},
     {"end", TokenType::END},
@@ -510,6 +562,8 @@ class Lexer {
     private:
         std::string text;
         int pos;
+        int lineno = 1;
+        int column = 0;
         char currentChar;
         void error(const std::string &message);
         char peek();
@@ -529,7 +583,12 @@ Lexer::Lexer(const std::string &aText) {
     currentChar = text[pos];
 }
 void Lexer::error(const std::string &message) {
-    throw std::runtime_error("Lexer error: " + message);
+    std::stringstream ss;
+    ss.str("");
+    ss << "Lexer error: Found unexpected char \'" 
+    << currentChar << "\' at line " << lineno << " column " << column;
+
+    throw LexerError(ss.str());
 }
 char Lexer::peek() {
     int nextPos = pos + 1;
@@ -540,11 +599,16 @@ char Lexer::peek() {
 }
 void Lexer::advance() {
     ++pos;
+    ++column;
     if (pos >= text.size()) {
         currentChar = '\0';
     }
     else {
         currentChar = text[pos];
+    }
+    if (currentChar == '\n') {
+        ++lineno;
+        column = 0;
     }
 }
 void Lexer::skip_comment() {
@@ -1405,7 +1469,7 @@ int main(int argc, char **argv) {
         interpreter->print_global_scope();
         std::cout << "Done\n";
     }
-    catch (std::runtime_error e) {
+    catch (Error e) {
         std::cerr << e.what() << std::endl;
     }
     return 0;
