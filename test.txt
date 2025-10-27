@@ -5,6 +5,7 @@ var
     begin
         x := 6;
         a := 2;
+        y := 5;
     end;
 begin
     x := 5;
