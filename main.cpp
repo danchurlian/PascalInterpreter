@@ -80,9 +80,9 @@ const std::string error_tostring(ErrorCode errorType) {
         case ErrorCode::UNEXPECTED_TOKEN:
         return "Unexpected token";
         case ErrorCode::UNDECLARED_ID:
-        return "Undeclared identifier found";
+        return "undeclared identifier";
         case ErrorCode::DUPLICATE_ID:
-        return "Duplicate identifier found";
+        return "duplicate identifier";
     }
     return "";
 }
@@ -100,7 +100,8 @@ class Error: public std::exception {
     protected:
         std::shared_ptr<Token> token;
         ErrorCode code;
-        const std::string message;
+        std::string message;
+        std::string msg;
     public:
     // what is error code used for?
         Error(const std::string& message, std::shared_ptr<Token> token = nullptr, ErrorCode code = ErrorCode::NONE) : message(message) {
@@ -126,6 +127,50 @@ class LexerError: public Error {
         }
 };
 
+class ParserError: public Error {
+    private:
+        TokenType expected;
+        TokenType got;
+    public:
+        ParserError(TokenType expected, TokenType got) : Error("") {
+            this->expected = expected;
+            this->got = got;
+            load_message();
+        }
+        void load_message() {
+            std::stringstream ss;
+            ss.str("");
+            ss <<  "ParserError: expected token \'" << tokenType_tostring(expected) << "\', got \'" << tokenType_tostring(got) << "\' token"; 
+            message = ss.str();
+        }
+        const char *what() const noexcept override {
+            return message.c_str();
+        }
+};
+
+// contains what? Variable name
+class SemanticError: public Error {
+    private:
+        std::string varName;
+        ErrorCode code;
+    public:
+        SemanticError(const std::string &varName, ErrorCode code) 
+        : Error("", nullptr, code) {
+            this->varName = varName;
+            this->code = code;
+            load_message();
+        }
+        void load_message() {
+            std::stringstream ss;
+            ss.str("");
+            ss << "SemanticError: found " << error_tostring(code)
+                << " \'" << varName << "\'";
+            message = ss.str();
+        }
+        const char *what() const noexcept override {
+            return message.c_str();
+        }
+};
 // ---------------------------------------------------------------------
 
 std::unordered_map<std::string, TokenType> Token::KEYWORDS = {
@@ -714,7 +759,7 @@ class Parser {
     private:
         std::unique_ptr<Lexer> lexer;
         std::shared_ptr<Token> currentToken;
-        void error(const std::string &message);
+        void error(TokenType expected, TokenType got);
         void eat(TokenType aTokenType);
         std::unique_ptr<Node> program(); 
         std::shared_ptr<Token> program_name();
@@ -752,14 +797,14 @@ void Parser::print_tokens() {
         currentToken = std::shared_ptr<Token>(lexer->get_next_token());
     }
 }
-void Parser::error(const std::string &message) {
-    throw std::runtime_error("Parser error: " +message);
+// only called by eat()
+void Parser::error(TokenType expected, TokenType got) {
+    throw ParserError(expected, got);
 }
 void Parser::eat(TokenType aTokenType) {
     if (currentToken->tokenType != aTokenType) {
         std::string errormsg = "expected token \'" +tokenType_tostring(aTokenType)+ "\', got \'" +tokenType_tostring(currentToken->tokenType)+ "\' token";
-        std::cout << currentToken << std::endl;
-        error(errormsg);
+        error(aTokenType, currentToken->tokenType);
     }
     currentToken = lexer->get_next_token();
 }
@@ -904,25 +949,25 @@ std::unique_ptr<Node> Parser::compoundStatement() {
 }
 std::vector<std::unique_ptr<Node>> Parser::statementList(std::vector<std::unique_ptr<Node>> &list) {
     if (currentToken->tokenType == TokenType::END_OF_FILE) {
-        error("missing \'END\' token");
+        return std::move(list);
     }
     if (currentToken->tokenType == TokenType::END) {
         std::unique_ptr<Node>statement = std::unique_ptr<Node>(emptyStatement());
         list.push_back(std::move(statement));
         return std::move(list);
     }
-    if (currentToken->tokenType == TokenType::BEGIN) {
+    else if (currentToken->tokenType == TokenType::BEGIN) {
         list.push_back(std::unique_ptr<Node>(compoundStatement()));
         eat(TokenType::SEMI);
         return statementList(list);
     }
 
+    // normal circumstance
     std::unique_ptr<Node> statement = assignStatement();
     list.push_back(std::move(statement));
     if (currentToken->tokenType == TokenType::SEMI) {
         eat(TokenType::SEMI);
     }
-    // this->error("Statement list error: edge case reached");
     return statementList(list);
 }
 std::unique_ptr<Node> Parser::assignStatement() {
@@ -965,7 +1010,7 @@ std::unique_ptr<Node> Parser::factor() {
         eat(TokenType::RPAREN);
         return exprRoot;
     }
-    this->error("Found an invalid factor");
+    // this->error("Found an invalid factor");
     return nullptr;
 }
 std::unique_ptr<Node> Parser::term() {
@@ -1022,8 +1067,6 @@ class SemanticAnalyzer: public Visitor {
         std::shared_ptr<SymbolTable> currentScope;
         std::shared_ptr<SymbolTable> builtinsScope;
 
-        // CREATE A BUILTINS SCOPE, WHICH WILL CONTAIN INTEGER AND REAL
-
     public:
         SemanticAnalyzer() {
             builtinsScope = std::make_shared<SymbolTable>(0, "builtins");
@@ -1045,7 +1088,7 @@ class SemanticAnalyzer: public Visitor {
             std::string name = node->name;
             SymbolTable *curr = currentScope.get();
             if (currentScope->lookup(name) == nullptr) {
-                throw std::runtime_error("SemanticAnalyzer found undeclared variable \"" +name+ "\"");
+                throw SemanticError(name, ErrorCode::UNDECLARED_ID);
             }
         }
 
@@ -1072,12 +1115,13 @@ class SemanticAnalyzer: public Visitor {
         void visitVarDeclaration(VarDeclaration *node) override {
             VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
             const std::string varName = varNode->name;
+            if (currentScope->lookup(varNode->name, true)) {
+                throw SemanticError(varNode->name, ErrorCode::DUPLICATE_ID);
+            }
+
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
             const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
 
-            if (currentScope->lookup(varNode->name, true)) {
-                throw std::runtime_error("SemanticAnalyzer found duplicate variable \"" +varNode->name+ "\"");
-            }
 
             std::shared_ptr<Symbol> typeSym = currentScope->lookup(typeName);
             std::shared_ptr<VarSymbol> varSymbol = std::make_shared<VarSymbol>(varNode->name, typeSym);
@@ -1093,6 +1137,10 @@ class SemanticAnalyzer: public Visitor {
         void visitParamDeclaration(ParamDeclaration *node) {
             VariableNode* varNode = dynamic_cast<VariableNode*>(node->varNode.get());
             const std::string name = varNode->name;
+            if (currentScope->lookup(varNode->name, true)) {
+                throw SemanticError(varNode->name, ErrorCode::DUPLICATE_ID);
+            }
+
             TypeNode* typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
             const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
 
@@ -1389,15 +1437,11 @@ void Interpreter::print_postorder() {
     std::unique_ptr<Visitor> printVisitor = std::make_unique<PrintVisitor>();
     root->accept(printVisitor.get());
 }
+// semantic analysis, throws a Semantic Error
 void Interpreter::build_symbol_table() {
     std::unique_ptr<SemanticAnalyzer> builder = std::make_unique<SemanticAnalyzer>();
-    try {
-        root->accept(builder.get());
-        builder->print_table();
-    }
-    catch (const std::runtime_error& e) {
-        error(e.what());
-    }
+    root->accept(builder.get());
+    builder->print_table();
 }
 void Interpreter::print_global_scope() {
     std::printf("\nGLOBAL SCOPE: \n");
@@ -1469,8 +1513,9 @@ int main(int argc, char **argv) {
         interpreter->print_global_scope();
         std::cout << "Done\n";
     }
-    catch (Error e) {
-        std::cerr << e.what() << std::endl;
+    catch (const std::exception& e) {
+        const char *errormessage = e.what();
+        std::cerr << errormessage << std::endl;
     }
     return 0;
 }
