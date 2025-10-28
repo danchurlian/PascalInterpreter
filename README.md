@@ -14,6 +14,6 @@ Here are some key features of the source code:
 - This interpreter contains a **Token** class, **Lexer** class, a **Parser** class, and an **Interpreter** class.
 - It also contains multiple visitors such as the **SemanticAnalyzer**, **PrintVisitor**, and **EvalVisitor**, which are applications of the *Node Visitor Pattern* designed to reduce heavy coupling with the Nodes.
 - This program also contains an **Abstract Syntax Tree** data structure with **Nodes** that result from parsing different *formal grammars*.
-- Custom error classes that extend ```std::exception``` for custom error handling.
+- Custom error classes that extend ```std::exception``` for custom error handling. Now these errors provide line and column numbers, which provide more information where the error is occurring.
 
 Feedback is always appreciated!

@@ -73,28 +73,64 @@ enum class ErrorCode {
     UNEXPECTED_TOKEN,
     UNDECLARED_ID,
     DUPLICATE_ID,
+    DUPLICATE_PROCEDURE,
     NONE,
 };
 const std::string error_tostring(ErrorCode errorType) {
     switch (errorType) {
         case ErrorCode::UNEXPECTED_TOKEN:
-        return "Unexpected token";
+            return "Unexpected token";
         case ErrorCode::UNDECLARED_ID:
-        return "undeclared identifier";
+            return "undeclared identifier";
         case ErrorCode::DUPLICATE_ID:
-        return "duplicate identifier";
+            return "duplicate identifier";
+        case ErrorCode::DUPLICATE_PROCEDURE:
+            return "duplicate procedure";
     }
     return "";
 }
+
+// ---------------------------------------------------------------------
+
 
 class Token {
     public:
         static std::unordered_map<std::string, TokenType> KEYWORDS;
         TokenType tokenType;
         std::string value;
-        Token(TokenType aTokenType, const std::string& aValue);
+        int lineno;
+        int column;
+        Token(TokenType aTokenType, const std::string& aValue, int lineno, int column);
         void print();
+        const std::string toString() {
+            std::stringstream ss;
+            ss << "{ TokenType::" << tokenType_tostring(tokenType) << " with value \'" << value << "\', line " << lineno << ", col " << column << " }";
+            return ss.str();
+        }
 };
+
+std::unordered_map<std::string, TokenType> Token::KEYWORDS = {
+    {"begin", TokenType::BEGIN},
+    {"end", TokenType::END},
+    {"program", TokenType::PROGRAM},
+    {"var", TokenType::VAR},
+    {"procedure", TokenType::PROCEDURE},
+    {"integer", TokenType::INTEGER},
+    {"real", TokenType::REAL},
+    {"div", TokenType::INT_DIV},
+};
+Token::Token(TokenType aTokenType, const std::string& aValue, int lineno, int column) {
+    tokenType = aTokenType;
+    value = aValue;
+    this->lineno = lineno;
+    this->column = column;
+}
+void Token::print() {
+    std::cout << "Token: { TokenType: " << tokenType_tostring(tokenType) << " | Value: \"" << value << "\" }\n";   
+}
+
+// ---------------------------------------------------------------------
+
 // the base class
 class Error: public std::exception {
     protected:
@@ -130,9 +166,9 @@ class LexerError: public Error {
 class ParserError: public Error {
     private:
         TokenType expected;
-        TokenType got;
+        std::shared_ptr<Token> got;
     public:
-        ParserError(TokenType expected, TokenType got) : Error("") {
+        ParserError(TokenType expected, std::shared_ptr<Token> got) : Error("") {
             this->expected = expected;
             this->got = got;
             load_message();
@@ -140,7 +176,7 @@ class ParserError: public Error {
         void load_message() {
             std::stringstream ss;
             ss.str("");
-            ss <<  "ParserError: expected token \'" << tokenType_tostring(expected) << "\', got \'" << tokenType_tostring(got) << "\' token"; 
+            ss <<  "ParserError: expected token \'" << tokenType_tostring(expected) << "\', got \'" << got->toString() << "\' token"; 
             message = ss.str();
         }
         const char *what() const noexcept override {
@@ -151,11 +187,13 @@ class ParserError: public Error {
 // contains what? Variable name
 class SemanticError: public Error {
     private:
+        std::shared_ptr<Token> token;
         std::string varName;
         ErrorCode code;
     public:
-        SemanticError(const std::string &varName, ErrorCode code) 
+        SemanticError(std::shared_ptr<Token> token, ErrorCode code) 
         : Error("", nullptr, code) {
+            this->token = token;
             this->varName = varName;
             this->code = code;
             load_message();
@@ -164,32 +202,13 @@ class SemanticError: public Error {
             std::stringstream ss;
             ss.str("");
             ss << "SemanticError: found " << error_tostring(code)
-                << " \'" << varName << "\'";
+                << " \'" << token->toString() << "\'";
             message = ss.str();
         }
         const char *what() const noexcept override {
             return message.c_str();
         }
 };
-// ---------------------------------------------------------------------
-
-std::unordered_map<std::string, TokenType> Token::KEYWORDS = {
-    {"begin", TokenType::BEGIN},
-    {"end", TokenType::END},
-    {"program", TokenType::PROGRAM},
-    {"var", TokenType::VAR},
-    {"procedure", TokenType::PROCEDURE},
-    {"integer", TokenType::INTEGER},
-    {"real", TokenType::REAL},
-    {"div", TokenType::INT_DIV},
-};
-Token::Token(TokenType aTokenType, const std::string& aValue) {
-    tokenType = aTokenType;
-    value = aValue;
-}
-void Token::print() {
-    std::cout << "Token: { TokenType: " << tokenType_tostring(tokenType) << " | Value: \"" << value << "\" }\n";   
-}
 
 // --------------------------------------------------------------
 
@@ -486,7 +505,7 @@ class TypeNode: public Node {
     public:
         std::unique_ptr<Token> type;
         TypeNode(TokenType tokenType) {
-            type = std::make_unique<Token>(tokenType, tokenType_tostring(tokenType));
+            type = std::make_unique<Token>(tokenType, tokenType_tostring(tokenType), 0, 0);
         }
         void accept(Visitor *visitor) override {}
         void print() override {}
@@ -610,7 +629,7 @@ class Lexer {
         int lineno = 1;
         int column = 0;
         char currentChar;
-        void error(const std::string &message);
+        void error();
         char peek();
         void advance();
         void skip_comment();
@@ -627,7 +646,7 @@ Lexer::Lexer(const std::string &aText) {
     pos = 0;
     currentChar = text[pos];
 }
-void Lexer::error(const std::string &message) {
+void Lexer::error() {
     std::stringstream ss;
     ss.str("");
     ss << "Lexer error: Found unexpected char \'" 
@@ -687,7 +706,7 @@ std::string Lexer::identifier() {
 }
 std::shared_ptr<Token> Lexer::get_next_token() {
     if (currentChar == '\0') {
-        return std::make_shared<Token>(TokenType::END_OF_FILE, "EOF");
+        return std::make_shared<Token>(TokenType::END_OF_FILE, "EOF", lineno, column);
     }
     while (currentChar == ' ' || currentChar == '\n' || currentChar == '{') {
         if (currentChar == ' ' || currentChar == '\n') {
@@ -697,59 +716,61 @@ std::shared_ptr<Token> Lexer::get_next_token() {
             skip_comment();
         }
     }
+    int tokenLine = lineno;
+    int tokenColumn = column;
     if (currentChar - '0' >= 0 && currentChar - '0' <= 9) {
-        return std::make_shared<Token>(TokenType::INT, integer());
+        return std::make_shared<Token>(TokenType::INT, integer(), tokenLine, tokenColumn);
     }
-    if (isalnum(currentChar)) {
+    else if (isalnum(currentChar)) {
         std::string id = identifier();
         std::string lexeme = id;
         std::transform(lexeme.begin(), lexeme.end(), lexeme.begin(), ::tolower);
         auto pair = Token::KEYWORDS.find(lexeme);
         if (pair != Token::KEYWORDS.end()) {
-            return std::make_shared<Token>(pair->second, pair->first);
+            return std::make_shared<Token>(pair->second, pair->first, tokenLine, tokenColumn);
         }
-        return std::make_shared<Token>(TokenType::VARIABLE, id);
+        return std::make_shared<Token>(TokenType::VARIABLE, id, tokenLine, tokenColumn);
     }
     switch (currentChar) { 
         case '+': 
             advance();
-            return std::make_shared<Token>(TokenType::ADD, "+");
+            return std::make_shared<Token>(TokenType::ADD, "+", tokenLine, tokenColumn);
         case '-':
             advance();
-            return std::make_shared<Token>(TokenType::SUB, "-");
+            return std::make_shared<Token>(TokenType::SUB, "-", tokenLine, tokenColumn);
         case '*':
             advance();
-            return std::make_shared<Token>(TokenType::MUL, "*");
+            return std::make_shared<Token>(TokenType::MUL, "*", tokenLine, tokenColumn);
         case '/':
             advance();
-            return std::make_shared<Token>(TokenType::DIV, "/");
+            return std::make_shared<Token>(TokenType::DIV, "/", tokenLine, tokenColumn);
         case '(':
             advance();
-            return std::make_shared<Token>(TokenType::LPAREN, "(");
+            return std::make_shared<Token>(TokenType::LPAREN, "(", tokenLine, tokenColumn);
         case ')':
             advance();
-            return std::make_shared<Token>(TokenType::RPAREN, ")");
+            return std::make_shared<Token>(TokenType::RPAREN, ")", tokenLine, tokenColumn);
         case ':':
             if (peek() == '=') {
                 advance();
                 advance();
-                return std::make_shared<Token>(TokenType::ASSIGN, ":=");  
+                return std::make_shared<Token>(TokenType::ASSIGN, ":=", tokenLine, tokenColumn);  
             } 
             advance();
-            return std::make_shared<Token>(TokenType::COLON, ":");
+            return std::make_shared<Token>(TokenType::COLON, ":", tokenLine, tokenColumn);
         case ',':
             advance();
-            return std::make_shared<Token>(TokenType::COMMA, ",");
+            return std::make_shared<Token>(TokenType::COMMA, ",", tokenLine, tokenColumn);
         case '.':
             advance();
-            return std::make_shared<Token>(TokenType::DOT, ".");
+            return std::make_shared<Token>(TokenType::DOT, ".", tokenLine, tokenColumn);
         case ';':
             advance();
-            return std::make_shared<Token>(TokenType::SEMI, ";");
+            return std::make_shared<Token>(TokenType::SEMI, ";", tokenLine, tokenColumn);
     }
 
-    std::string errormsg = "Invalid token ";
-    error(errormsg + "\'" + currentChar + "\'" + " found");
+    // std::string errormsg = "Invalid token ";
+    error();
     return nullptr;
 }
 
@@ -759,7 +780,7 @@ class Parser {
     private:
         std::unique_ptr<Lexer> lexer;
         std::shared_ptr<Token> currentToken;
-        void error(TokenType expected, TokenType got);
+        void error(TokenType expected, std::shared_ptr<Token> got);
         void eat(TokenType aTokenType);
         std::unique_ptr<Node> program(); 
         std::shared_ptr<Token> program_name();
@@ -798,13 +819,13 @@ void Parser::print_tokens() {
     }
 }
 // only called by eat()
-void Parser::error(TokenType expected, TokenType got) {
+void Parser::error(TokenType expected, std::shared_ptr<Token> got) {
     throw ParserError(expected, got);
 }
 void Parser::eat(TokenType aTokenType) {
     if (currentToken->tokenType != aTokenType) {
         std::string errormsg = "expected token \'" +tokenType_tostring(aTokenType)+ "\', got \'" +tokenType_tostring(currentToken->tokenType)+ "\' token";
-        error(aTokenType, currentToken->tokenType);
+        error(aTokenType, currentToken);
     }
     currentToken = lexer->get_next_token();
 }
@@ -1010,7 +1031,6 @@ std::unique_ptr<Node> Parser::factor() {
         eat(TokenType::RPAREN);
         return exprRoot;
     }
-    // this->error("Found an invalid factor");
     return nullptr;
 }
 std::unique_ptr<Node> Parser::term() {
@@ -1088,7 +1108,7 @@ class SemanticAnalyzer: public Visitor {
             std::string name = node->name;
             SymbolTable *curr = currentScope.get();
             if (currentScope->lookup(name) == nullptr) {
-                throw SemanticError(name, ErrorCode::UNDECLARED_ID);
+                throw SemanticError(node->variableToken, ErrorCode::UNDECLARED_ID);
             }
         }
 
@@ -1114,9 +1134,10 @@ class SemanticAnalyzer: public Visitor {
 
         void visitVarDeclaration(VarDeclaration *node) override {
             VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
+            std::shared_ptr<Token> varToken = varNode->variableToken;
             const std::string varName = varNode->name;
             if (currentScope->lookup(varNode->name, true)) {
-                throw SemanticError(varNode->name, ErrorCode::DUPLICATE_ID);
+                throw SemanticError(varToken, ErrorCode::DUPLICATE_ID);
             }
 
             TypeNode *typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
@@ -1136,9 +1157,11 @@ class SemanticAnalyzer: public Visitor {
 
         void visitParamDeclaration(ParamDeclaration *node) {
             VariableNode* varNode = dynamic_cast<VariableNode*>(node->varNode.get());
+            std::shared_ptr<Token> varToken = varNode->variableToken;
             const std::string name = varNode->name;
+
             if (currentScope->lookup(varNode->name, true)) {
-                throw SemanticError(varNode->name, ErrorCode::DUPLICATE_ID);
+                throw SemanticError(varToken, ErrorCode::DUPLICATE_ID);
             }
 
             TypeNode* typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
@@ -1150,8 +1173,9 @@ class SemanticAnalyzer: public Visitor {
 
         void visitProcedure(Procedure *node) {
             const std::string procedureName = node->id->value;
+            std::shared_ptr<Token> procedureToken = node->id;
             if (symTable->lookup(procedureName)) {
-                throw std::runtime_error("SemanticAnalyzer found duplicate procedure \"" +procedureName+ "\"");
+                throw SemanticError(procedureToken, ErrorCode::DUPLICATE_PROCEDURE);
             } else {
                 std::shared_ptr<Symbol> procSym = std::make_shared<ProcedureSymbol>(procedureName);
                 symTable->define(procSym);

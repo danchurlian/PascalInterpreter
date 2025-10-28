@@ -3,9 +3,12 @@ var
     x, y : INTEGER;
     procedure p1(a, x : INTEGER);
     begin
-        x := 6;
+        x := 26;
         a := 2;
-        y := 5;
+    end;
+
+    procedure p1;
+    begin
     end;
 begin
     x := 5;
