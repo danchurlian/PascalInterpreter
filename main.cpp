@@ -219,6 +219,7 @@ class UnaryOp;
 class VariableNode;
 class AssignStatement;
 class CompoundStatement;
+class ProcedureCall;
 class EmptyStatement;
 class TypeNode;
 class VarDeclaration;
@@ -337,6 +338,7 @@ class Visitor {
         virtual void visitVariableNode(VariableNode *node) {};
         virtual void visitCompoundStatement(CompoundStatement *node) {};
         virtual void visitAssignStatement(AssignStatement *node) {};
+        virtual void visitProcedureCall(ProcedureCall *node) {};
         virtual void visitEmptyStatement(EmptyStatement *node) {};
         virtual void visitVarDeclaration(VarDeclaration *node) {};
         virtual void visitDeclarationRoot(DeclarationRoot *node) {};
@@ -428,6 +430,8 @@ void UnaryOp::accept(Visitor *visitor) {
 void UnaryOp::print() {
     std::cout << "UnaryOp: { Type: " << tokenType_tostring(op->tokenType) << " }\n";
 }
+
+
 // Does not store a type
 class VariableNode: public Node {
     public:
@@ -464,6 +468,26 @@ void CompoundStatement::accept(Visitor *visitor) {
 void CompoundStatement::print() {
     std::cout << "Compound Statement\n";
 }
+
+
+class ProcedureCall: public Node {
+    public:
+        std::shared_ptr<Token> procedure;
+        std::vector<std::unique_ptr<Node>> args;
+
+        ProcedureCall(std::shared_ptr<Token> &procedure, std::vector<std::unique_ptr<Node>> &&args) {
+            this->procedure = procedure;
+            this->args = std::move(args);
+        }
+        void accept(Visitor *visitor) override {
+            visitor->visitProcedureCall(this);
+        }
+        void print() override {
+            std::cout << "Procedure call { " << procedure->value << "( ... ) }\n";
+        }
+};
+
+
 class AssignStatement: public Node {
     public:
         std::unique_ptr<Node> left;
@@ -489,6 +513,8 @@ void AssignStatement::print() {
         std::cout << "Assignment Statement { " << node->name << " = ... }\n";
     }
 }
+
+
 class EmptyStatement: public Node {
     public:
         EmptyStatement() {};
@@ -501,6 +527,8 @@ void EmptyStatement::accept(Visitor *visitor) {
 void EmptyStatement::print() {
     std::printf("Empty Statement\n");
 }
+
+
 class TypeNode: public Node {
     public:
         std::unique_ptr<Token> type;
@@ -510,6 +538,8 @@ class TypeNode: public Node {
         void accept(Visitor *visitor) override {}
         void print() override {}
 };
+
+
 // tokenType must be INTEGER or REAL
 class VarDeclaration: public Node {
     public:
@@ -628,7 +658,6 @@ class Lexer {
         int pos;
         int lineno = 1;
         int column = 0;
-        char currentChar;
         void error();
         char peek();
         void advance();
@@ -637,6 +666,7 @@ class Lexer {
         std::string integer();
         std::string identifier();
     public:
+        char currentChar;
         Lexer(const std::string &aText);
         std::shared_ptr<Token> get_next_token();
     
@@ -794,6 +824,8 @@ class Parser {
         std::unique_ptr<Node> compoundStatement();
         std::vector<std::unique_ptr<Node>> statementList(std::vector<std::unique_ptr<Node>> &list);
         std::unique_ptr<Node> assignStatement();
+        std::unique_ptr<Node> procedureCall();
+        std::vector<std::unique_ptr<Node>> argList(std::vector<std::unique_ptr<Node>> &list);
         std::unique_ptr<Node> emptyStatement();
         std::unique_ptr<Node> factor();
         std::unique_ptr<Node> term();
@@ -984,7 +1016,12 @@ std::vector<std::unique_ptr<Node>> Parser::statementList(std::vector<std::unique
     }
 
     // normal circumstance
-    std::unique_ptr<Node> statement = assignStatement();
+    std::unique_ptr<Node> statement;
+    if (currentToken->tokenType == TokenType::VARIABLE && lexer->currentChar == '(') {
+        statement = procedureCall();
+    } else {
+        statement = assignStatement();
+    }
     list.push_back(std::move(statement));
     if (currentToken->tokenType == TokenType::SEMI) {
         eat(TokenType::SEMI);
@@ -999,23 +1036,55 @@ std::unique_ptr<Node> Parser::assignStatement() {
     std::shared_ptr<Token> assign = currentToken;
     eat(TokenType::ASSIGN);
 
-    std::unique_ptr<Node> right = factor();
+    std::unique_ptr<Node> right = expr();
     std::unique_ptr<Node> newNode = std::make_unique<AssignStatement>(std::move(variableNode), assign, std::move(right));
     return newNode;
+}
+
+// name LPAREN expr (COMMA expr)* RPAREN
+std::unique_ptr<Node> Parser::procedureCall() {
+    std::shared_ptr<Token> proc = currentToken;
+    eat(TokenType::VARIABLE);
+    eat(TokenType::LPAREN);
+
+    std::vector<std::unique_ptr<Node>> args;
+    args = argList(args);
+
+    eat(TokenType::RPAREN);
+
+    std::unique_ptr<Node> node = std::make_unique<ProcedureCall>(proc, std::move(args));
+
+    return node;
+}
+
+// expr (, expr)*
+std::vector<std::unique_ptr<Node>> Parser::argList(std::vector<std::unique_ptr<Node>> &list) {
+    std::unique_ptr<Node> express = expr();
+
+    list.push_back(std::move(express));
+
+    if (currentToken->tokenType == TokenType::COMMA) {
+        eat(TokenType::COMMA);
+        list = argList(list);
+    }
+    return std::move(list);
 }
 std::unique_ptr<Node> Parser::emptyStatement() {
     return std::make_unique<EmptyStatement>();
 }
 std::unique_ptr<Node> Parser::factor() {
     std::shared_ptr<Token> current = currentToken;
+    // regular number node
     if (current->tokenType == TokenType::INT) {
         eat(TokenType::INT);
         return std::make_unique<NumberNode>(current); // passing raw pointer into NumberNode constructor, creating a new shared_ptr
     }
+    // case of a variable
     if (current->tokenType == TokenType::VARIABLE) {
         eat(TokenType::VARIABLE);
         return std::make_unique<VariableNode>(current);
     }
+    // check for unary operator
     if (current->tokenType == TokenType::ADD || current->tokenType == TokenType::SUB) {
         switch (current->tokenType) {
             case TokenType::ADD: eat(TokenType::ADD); break;
@@ -1025,6 +1094,7 @@ std::unique_ptr<Node> Parser::factor() {
         std::unique_ptr<Node> unaryOp = std::make_unique<UnaryOp>(current, std::move(factorNode));
         return unaryOp;
     }
+    // check for an expression
     if (current->tokenType == TokenType::LPAREN) {
         eat(TokenType::LPAREN);
         std::unique_ptr<Node> exprRoot = expr();
@@ -1368,6 +1438,15 @@ class PrintVisitor: public Visitor {
             --level;
 
             print_with_tabs(level,"");
+            node->print();
+        }
+        void visitProcedureCall(ProcedureCall *node) {
+            ++level;
+            for (auto &arg : node->args) {
+                arg->accept(this);
+            }
+            --level;
+            print_with_tabs(level, "");
             node->print();
         }
         void visitEmptyStatement(EmptyStatement *node) {
