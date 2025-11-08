@@ -1,6 +1,6 @@
 program Test;
 var
-    foo, bar : INTEGER;
+    foo, bar, interesting : INTEGER;
     procedure p1(a, x : INTEGER);
     begin
         a := 2;
@@ -10,4 +10,5 @@ begin
     p1(10 + 15*2, 11);
     foo := 10*2 + 1;
     bar := foo - 10;
+    interesting := foo * bar;
 end.

@@ -10,6 +10,92 @@
 #include <algorithm>
 #include <fstream>
 
+
+class ActivationRecord {
+    private:
+        std::string procedureName;
+        std::unordered_map<std::string, int>
+            memory;
+        int scope;
+    public:
+        ActivationRecord(std::string procedureName) {
+            this->procedureName = procedureName;
+        }
+
+        void setScope(int scope) {
+            this->scope = scope;
+        }
+
+        // void declare(VariableNode *varNode) {
+        //     std::string name = varNode->variableToken->value;
+            
+        // }
+
+        int lookup(std::string name) {
+            int result = -1;
+            if (memory.find(name) != memory.end())
+                result = memory[name];
+            return result;
+        }
+
+        // the value might change
+        void assign(std::string name, int value) {
+            memory[name] = value;
+        }
+
+        const std::string toString() {
+            std::stringstream ss;
+            ss << "Activation record: Name = \"" << procedureName
+                << "\", Scope = " << scope << "\n";
+            for (auto pair : memory) {
+                ss << " { \"" << pair.first << "\" = " << pair.second << " }\n";
+            }
+            return ss.str();
+        }
+};
+
+// Main class for the call stack, which holes activation records.
+class CallStack {
+    private:
+        std::vector<std::unique_ptr<ActivationRecord>> records;
+        int top = -1;
+
+    public:
+        CallStack() {};
+
+        bool isEmpty() {
+            return top == -1;
+        }
+
+        ActivationRecord* peek() {
+            ActivationRecord* result = nullptr;
+            if (!isEmpty() && top + 1 == records.size())
+                result = records[top].get();
+            return result;
+        }
+
+        void pop() {
+            records.erase(records.end() - 1);
+            top--;
+        }
+
+        void push(std::unique_ptr<ActivationRecord> record) {
+            top++;
+            ActivationRecord *ptr = record.get();
+            records.push_back(std::move(record));
+
+            ptr->setScope(top);
+        }
+
+        void print() {
+            std::cout << "Call stack:\n";
+            for (auto it = records.begin(); it != records.end(); ++it) {
+                std::cout << (*it)->toString() << "\n";
+            }
+        }
+};
+
+// ----------------------------------------------------------------------------
 enum class TokenType {
     ADD,
     SUB,
@@ -1289,6 +1375,8 @@ class EvalVisitor: public Visitor {
     private:
         std::unordered_map<Node*, int> nodeValues;
         std::unordered_map<std::string, int> varValues;
+        std::unique_ptr<CallStack> callStack = std::make_unique<CallStack>();
+
         void error(const std::string &msg) {
             std::string errormsg = "EvalVisitor error: ";
             throw std::runtime_error(errormsg +msg+ "\n");
@@ -1334,11 +1422,12 @@ class EvalVisitor: public Visitor {
         }
         // only for right-hand side evaluation (math expressions)
         void visitVariableNode(VariableNode *node) override {
-            if (varValues.find(node->name) == varValues.end()) {
-                error("Variable \"" +node->name+ "\" was not initialized");
-                return;
-            }
-            nodeValues[node] = varValues[node->name];
+            // if (varValues.find(node->name) == varValues.end()) {
+            //     error("Variable \"" +node->name+ "\" was not initialized");
+            //     return;
+            // }
+            ActivationRecord *ar = callStack->peek();
+            nodeValues[node] = ar->lookup(node->name);
         }
         void visitAssignStatement(AssignStatement *node) {
             VariableNode *leftNode = dynamic_cast<VariableNode*>(node->left.get());
@@ -1349,7 +1438,10 @@ class EvalVisitor: public Visitor {
             // }
             node->right->accept(this);
             int rightValue = nodeValues[node->right.get()];
-            varValues[varName] = rightValue;
+            ActivationRecord *ar = callStack->peek();
+            // assert that it cannot be empty
+            ar->assign(varName, rightValue);
+            // varValues[varName] = rightValue;
         }
         void visitEmptyStatement(EmptyStatement *node) {
             // nothing
@@ -1368,6 +1460,14 @@ class EvalVisitor: public Visitor {
                 child->accept(this);
             }
         }
+        void visitProcedure(Procedure* node) {
+            // add the stack
+            callStack->push(std::make_unique<ActivationRecord>(
+                node->id->value
+            ));
+            // pop the stack
+            callStack->pop();
+        }
         void visitBlock(Block *node) {
             for (auto &varDeclaration : node->varDeclarations) {
                 varDeclaration->accept(this);
@@ -1375,7 +1475,12 @@ class EvalVisitor: public Visitor {
             node->compoundStatement->accept(this);
         }
         void visitProgramNode(ProgramNode *node) {
+            callStack->push(std::make_unique<ActivationRecord>(
+                node->programName->value
+            ));
             node->block->accept(this);
+            callStack->print();
+            callStack->pop();
         }
 };
 
@@ -1531,8 +1636,7 @@ void Interpreter::interpret() {
     try {
         root->accept(evalVisitor.get());
         GLOBAL_SCOPE = evalVisitor->getVarValues();
-    }
-    catch(const std::exception& e) {
+    } catch(const std::exception& e) {
         error(e.what());
     }
 }
