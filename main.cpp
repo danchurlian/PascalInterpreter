@@ -14,8 +14,8 @@
 class ActivationRecord {
     private:
         std::string procedureName;
-        std::unordered_map<std::string, int>
-            memory;
+        std::unordered_map<std::string, int> memory;
+        std::unordered_map<std::string, int> argValues;
         int scope;
     public:
         ActivationRecord(std::string procedureName) {
@@ -160,6 +160,8 @@ enum class ErrorCode {
     UNDECLARED_ID,
     DUPLICATE_ID,
     DUPLICATE_PROCEDURE,
+    UNDECLARED_PROCEDURE,
+    PROCEDURE_ARGUMENT_MISMATCH,
     NONE,
 };
 const std::string error_tostring(ErrorCode errorType) {
@@ -172,8 +174,12 @@ const std::string error_tostring(ErrorCode errorType) {
             return "duplicate identifier";
         case ErrorCode::DUPLICATE_PROCEDURE:
             return "duplicate procedure";
+        case ErrorCode::UNDECLARED_PROCEDURE:
+            return "undeclared procedure";
+        case ErrorCode::PROCEDURE_ARGUMENT_MISMATCH:
+            return "procedure call has mismatched arguments";
     }
-    return "";
+    return "Unknown ErrorCode";
 }
 
 // ---------------------------------------------------------------------
@@ -334,7 +340,11 @@ class Symbol {
 
 class ProcedureSymbol: public Symbol {
     public:
-        ProcedureSymbol(const std::string &name) : Symbol(name) {};
+        Block *block;
+        std::vector<std::shared_ptr<Symbol>> formalParams;
+
+        ProcedureSymbol(const std::string &name, Block* block) : Symbol(name), block(block) {}
+        
         void print() override {
             std::cout << "Procedure symbol: " << name;
         }
@@ -560,6 +570,7 @@ class ProcedureCall: public Node {
     public:
         std::shared_ptr<Token> procedure;
         std::vector<std::unique_ptr<Node>> args;
+        std::shared_ptr<ProcedureSymbol> procSymbol;
 
         ProcedureCall(std::shared_ptr<Token> &procedure, std::vector<std::unique_ptr<Node>> &&args) {
             this->procedure = procedure;
@@ -1134,7 +1145,8 @@ std::unique_ptr<Node> Parser::procedureCall() {
     eat(TokenType::LPAREN);
 
     std::vector<std::unique_ptr<Node>> args;
-    args = argList(args);
+    if (currentToken->tokenType != TokenType::RPAREN)
+        args = argList(args);
 
     eat(TokenType::RPAREN);
 
@@ -1312,28 +1324,22 @@ class SemanticAnalyzer: public Visitor {
         // }
 
         void visitParamDeclaration(ParamDeclaration *node) {
-            VariableNode* varNode = dynamic_cast<VariableNode*>(node->varNode.get());
-            std::shared_ptr<Token> varToken = varNode->variableToken;
-            const std::string name = varNode->name;
-
-            if (currentScope->lookup(varNode->name, true)) {
-                throw SemanticError(varToken, ErrorCode::DUPLICATE_ID);
-            }
-
-            TypeNode* typeNode = dynamic_cast<TypeNode*>(node->typeNode.get());
-            const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
-
-            std::shared_ptr<Symbol> paramSym = std::make_shared<VarSymbol>(name, symTable->lookup(typeName));
-            currentScope->define(paramSym);
+            
         }
 
         void visitProcedure(Procedure *node) {
+            // check if not already declared
             const std::string procedureName = node->id->value;
             std::shared_ptr<Token> procedureToken = node->id;
             if (symTable->lookup(procedureName)) {
                 throw SemanticError(procedureToken, ErrorCode::DUPLICATE_PROCEDURE);
             } else {
-                std::shared_ptr<Symbol> procSym = std::make_shared<ProcedureSymbol>(procedureName);
+                // add new symbol to symbol table
+                // scope is 1 less than children
+                Block *block = dynamic_cast<Block*>( node->block.get());
+                std::shared_ptr<ProcedureSymbol> procSym = std::make_shared<ProcedureSymbol>(
+                    procedureName, block
+                );
                 symTable->define(procSym);
 
                 // increment the scope and change current scope
@@ -1341,12 +1347,57 @@ class SemanticAnalyzer: public Visitor {
 
                 for (auto &param : node->paramDeclarations) {
                     param->accept(this);
+
+                    ParamDeclaration* paramDec = dynamic_cast<ParamDeclaration*>(param.get());
+
+
+                    // check if param declared already in (a, b, c) param list
+                    VariableNode* varNode = dynamic_cast<VariableNode*>(paramDec->varNode.get());
+                    std::shared_ptr<Token> varToken = varNode->variableToken;
+
+                    const std::string name = varNode->name;
+                    if (currentScope->lookup(varNode->name, true)) {
+                        throw SemanticError(varToken, ErrorCode::DUPLICATE_ID);
+                    }
+
+                    // get type node and type string and symbol
+                    TypeNode* typeNode = dynamic_cast<TypeNode*>(paramDec->typeNode.get());
+                    const std::string typeName = tokenType_tostring(typeNode->type->tokenType);
+
+                    // create new param symbol and add to things
+                    std::shared_ptr<Symbol> paramSym = std::make_shared<VarSymbol>(name, symTable->lookup(typeName));
+                    currentScope->define(paramSym);
+                    procSym->formalParams.push_back(paramSym);
                 }
                 node->block->accept(this);
                 currentScope->print();
 
                 // decrement the scope
                 currentScope = currentScope->enclosingScope;
+            }
+        }
+
+        void visitProcedureCall(ProcedureCall* node) {
+
+            // check undeclared procedure
+            std::shared_ptr<Symbol> procSym = currentScope->
+                lookup(node->procedure->value);
+            if (procSym == nullptr)
+                throw SemanticError(node->procedure, 
+                    ErrorCode::UNDECLARED_PROCEDURE);
+            
+            // procedure call AST node points to procedure symbol
+            std::shared_ptr<ProcedureSymbol> procSymCasted
+                = std::static_pointer_cast<ProcedureSymbol>(procSym);
+            node->procSymbol = procSymCasted;
+            
+            // make sure length of args and param list lengths same
+            if (node->args.size() != procSymCasted->formalParams.size())
+                throw SemanticError(node->procedure, 
+                    ErrorCode::PROCEDURE_ARGUMENT_MISMATCH);
+            
+            for (auto &arg : node->args) {
+                arg->accept(this);
             }
         }
 
@@ -1461,12 +1512,34 @@ class EvalVisitor: public Visitor {
             }
         }
         void visitProcedure(Procedure* node) {
-            // add the stack
-            callStack->push(std::make_unique<ActivationRecord>(
-                node->id->value
-            ));
-            // pop the stack
-            callStack->pop();
+
+        }
+        void visitProcedureCall(ProcedureCall *node) {
+            // // add the stack
+            // std::string procName = node->procedure->value;
+
+            // std::unique_ptr<ActivationRecord> record =
+            //     std::make_unique<ActivationRecord>(procName);
+            // callStack->push(std::move(record));
+
+            // // needs to get the procedure symbol
+            // std::shared_ptr<Symbol> procSymbol = node->procSymbol;
+            // // this is found in symbol table lookup "name"
+
+            // // add arguments to a map 
+            // // key = name of param, value is integer value from result
+            // for (auto &argRoot : node->args) {
+            //     argRoot->accept(this);
+            //     int result = nodeValues[argRoot.get()]; // value
+            //     // how to get key?
+            //     // add it to the map
+            // }
+            // // insert the map to the proc symbol parameters
+            // // execute the procedure
+            // // procSymbol->block->accept(this);
+
+            // // pop the stack
+            // callStack->pop();
         }
         void visitBlock(Block *node) {
             for (auto &varDeclaration : node->varDeclarations) {
@@ -1547,8 +1620,10 @@ class PrintVisitor: public Visitor {
         }
         void visitProcedureCall(ProcedureCall *node) {
             ++level;
-            for (auto &arg : node->args) {
-                arg->accept(this);
+            if (node->args.size() > 0) {
+                for (auto &arg : node->args) {
+                    arg->accept(this);
+                }
             }
             --level;
             print_with_tabs(level, "");
