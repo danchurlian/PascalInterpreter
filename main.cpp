@@ -25,11 +25,6 @@ class ActivationRecord {
             this->scope = scope;
         }
 
-        // void declare(VariableNode *varNode) {
-        //     std::string name = varNode->variableToken->value;
-            
-        // }
-
         int lookup(std::string name) {
             int result = -1;
             if (memory.find(name) != memory.end())
