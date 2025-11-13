@@ -15,7 +15,6 @@ class ActivationRecord {
     private:
         std::string procedureName;
         std::unordered_map<std::string, int> memory;
-        std::unordered_map<std::string, int> argValues;
         int scope;
     public:
         ActivationRecord(std::string procedureName) {
@@ -40,9 +39,10 @@ class ActivationRecord {
 
         // the value might change
         void assign(std::string name, int value) {
-            memory[name] = value;
+            memory.insert_or_assign(name, value);
         }
 
+        // Returns a string containing the contents of the activation record
         const std::string toString() {
             std::stringstream ss;
             ss << "Activation record: Name = \"" << procedureName
@@ -69,7 +69,7 @@ class CallStack {
 
         ActivationRecord* peek() {
             ActivationRecord* result = nullptr;
-            if (!isEmpty() && top + 1 == records.size())
+            if (!isEmpty())
                 result = records[top].get();
             return result;
         }
@@ -92,6 +92,10 @@ class CallStack {
             for (auto it = records.begin(); it != records.end(); ++it) {
                 std::cout << (*it)->toString() << "\n";
             }
+        }
+
+        void printHighestRecord() {
+            std::cout << records[top]->toString() << "\n";
         }
 };
 
@@ -419,6 +423,7 @@ class SymbolTable {
                 pair.second->print();
                 std::cout << " }\n";
             }
+            std::cout << "\n";
         }
 };
 
@@ -1327,6 +1332,13 @@ class SemanticAnalyzer: public Visitor {
             
         }
 
+        /*
+         * 
+         1. not declared already
+         2. new symbol table
+         3. create procedure symbol
+         4. create var symbols for parameters
+         */
         void visitProcedure(Procedure *node) {
             // check if not already declared
             const std::string procedureName = node->id->value;
@@ -1336,7 +1348,7 @@ class SemanticAnalyzer: public Visitor {
             } else {
                 // add new symbol to symbol table
                 // scope is 1 less than children
-                Block *block = dynamic_cast<Block*>( node->block.get());
+                Block *block = dynamic_cast<Block*>(node->block.get());
                 std::shared_ptr<ProcedureSymbol> procSym = std::make_shared<ProcedureSymbol>(
                     procedureName, block
                 );
@@ -1473,29 +1485,17 @@ class EvalVisitor: public Visitor {
         }
         // only for right-hand side evaluation (math expressions)
         void visitVariableNode(VariableNode *node) override {
-            // if (varValues.find(node->name) == varValues.end()) {
-            //     error("Variable \"" +node->name+ "\" was not initialized");
-            //     return;
-            // }
-            ActivationRecord *ar = callStack->peek();
-            nodeValues[node] = ar->lookup(node->name);
+            ActivationRecord *record = callStack->peek();
+            nodeValues[node] = record->lookup(node->name);
         }
         void visitAssignStatement(AssignStatement *node) {
             VariableNode *leftNode = dynamic_cast<VariableNode*>(node->left.get());
             std::string varName = leftNode->name;
-            // if (varValues.find(varName) == varValues.end()) {
-            //     error("Variable \"" +varName+ "\" was not declared");
-            //     return;
-            // }
             node->right->accept(this);
             int rightValue = nodeValues[node->right.get()];
-            ActivationRecord *ar = callStack->peek();
+            ActivationRecord *record = callStack->peek();
             // assert that it cannot be empty
-            ar->assign(varName, rightValue);
-            // varValues[varName] = rightValue;
-        }
-        void visitEmptyStatement(EmptyStatement *node) {
-            // nothing
+            record->assign(varName, rightValue);
         }
         void visitCompoundStatement(CompoundStatement *node) {
             for (auto &child : node->statementList) {
@@ -1504,42 +1504,44 @@ class EvalVisitor: public Visitor {
         }
         void visitVarDeclaration(VarDeclaration *node) {
             VariableNode *varNode = dynamic_cast<VariableNode*>(node->varNode.get());
-            varValues[varNode->name] = 0;
+            ActivationRecord *record = callStack->peek();
+            record->assign(varNode->name, 0);
         }
         void visitDeclarationRoot(DeclarationRoot *node) {
             for (auto &child : node->declarations) {
                 child->accept(this);
             }
         }
-        void visitProcedure(Procedure* node) {
-
-        }
         void visitProcedureCall(ProcedureCall *node) {
-            // // add the stack
-            // std::string procName = node->procedure->value;
+            // add the stack
+            std::string procName = node->procedure->value;
 
-            // std::unique_ptr<ActivationRecord> record =
-            //     std::make_unique<ActivationRecord>(procName);
-            // callStack->push(std::move(record));
+            std::unique_ptr<ActivationRecord> newRecord =
+                std::make_unique<ActivationRecord>(procName);
+            ActivationRecord *prevRecord = callStack->peek();
+            
+            // needs to get the procedure symbol
+            std::shared_ptr<ProcedureSymbol> procSymbol = 
+            std::static_pointer_cast<ProcedureSymbol>(node->procSymbol);
+            // this is found in symbol table lookup "name"
+            
+            // add arguments to the activation memory map
+            // key = name of param, value is integer value from result
+            for (int i = 0; i < node->args.size(); i++) {
+                auto &argRoot = node->args[i];
+                argRoot->accept(this);
 
-            // // needs to get the procedure symbol
-            // std::shared_ptr<Symbol> procSymbol = node->procSymbol;
-            // // this is found in symbol table lookup "name"
+                // get name and value
+                int calculateResult = nodeValues[argRoot.get()];
+                std::string paramName = procSymbol->formalParams[i]->name;
+                newRecord->assign(paramName, calculateResult);
+            }
+            callStack->push(std::move(newRecord));
+            procSymbol->block->accept(this);
 
-            // // add arguments to a map 
-            // // key = name of param, value is integer value from result
-            // for (auto &argRoot : node->args) {
-            //     argRoot->accept(this);
-            //     int result = nodeValues[argRoot.get()]; // value
-            //     // how to get key?
-            //     // add it to the map
-            // }
-            // // insert the map to the proc symbol parameters
-            // // execute the procedure
-            // // procSymbol->block->accept(this);
-
-            // // pop the stack
-            // callStack->pop();
+            // pop the stack
+            callStack->printHighestRecord();
+            callStack->pop();
         }
         void visitBlock(Block *node) {
             for (auto &varDeclaration : node->varDeclarations) {
@@ -1552,7 +1554,7 @@ class EvalVisitor: public Visitor {
                 node->programName->value
             ));
             node->block->accept(this);
-            callStack->print();
+            callStack->printHighestRecord();
             callStack->pop();
         }
 };
@@ -1680,6 +1682,7 @@ class PrintVisitor: public Visitor {
             --level;
             print_with_tabs(level, "");
             node->print();
+            std::cout << "\n";
         }
 };
 
