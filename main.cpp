@@ -246,7 +246,7 @@ class Error: public std::exception {
 class LexerError: public Error {
     public:
         // Lexer: unexpected char c at (5:2)
-        LexerError(const std::string &message) 
+        LexerError(const std::string& message) 
         : Error(message) {}
 
         const char *what() const noexcept override {
@@ -330,9 +330,9 @@ class Symbol {
         std::shared_ptr<Symbol> type;
     private:
     public:
-        Symbol(const std::string &name) : name(name), type(nullptr) {};
+        Symbol(const std::string& name) : name(name), type(nullptr) {};
 
-        Symbol(const std::string &name, std::shared_ptr<Symbol> type) : name(name), type(type) {};
+        Symbol(const std::string& name, std::shared_ptr<Symbol> type) : name(name), type(type) {};
 
         virtual void print() = 0;
 };
@@ -342,7 +342,7 @@ class ProcedureSymbol: public Symbol {
         Block *block;
         std::vector<std::shared_ptr<Symbol>> formalParams;
 
-        ProcedureSymbol(const std::string &name, Block* block) : Symbol(name), block(block) {}
+        ProcedureSymbol(const std::string& name, Block *block) : Symbol(name), block(block) {}
         
         void print() override {
             std::cout << "Procedure symbol: " << name;
@@ -351,7 +351,7 @@ class ProcedureSymbol: public Symbol {
 
 class ProgramSymbol: public Symbol {
     public:
-        ProgramSymbol(const std::string &name) : Symbol(name) {};
+        ProgramSymbol(const std::string& name) : Symbol(name) {};
         void print() override {
             std::cout << "Program symbol: " << name;
         }
@@ -359,7 +359,7 @@ class ProgramSymbol: public Symbol {
 
 class VarSymbol: public Symbol {
     public:
-        VarSymbol(const std::string &name, std::shared_ptr<Symbol> type) : Symbol(name, type) {};
+        VarSymbol(const std::string& name, std::shared_ptr<Symbol> type) : Symbol(name, type) {};
 
         void print() override {
             std::cout << "Var symbol: " << name << " | ";
@@ -369,7 +369,7 @@ class VarSymbol: public Symbol {
 
 class BuiltinTypeSymbol: public Symbol {
     public:
-        BuiltinTypeSymbol(const std::string &name) : Symbol(name) {};
+        BuiltinTypeSymbol(const std::string& name) : Symbol(name) {};
         void print() override {
             std::cout << "Type symbol: " << name;
         }
@@ -387,7 +387,7 @@ class SymbolTable {
         int level;
         
 
-        SymbolTable(int level, const std::string &name, const std::shared_ptr<SymbolTable> enclosingScope = nullptr) : level(level), name(name) {
+        SymbolTable(int level, const std::string& name, const std::shared_ptr<SymbolTable> enclosingScope = nullptr) : level(level), name(name) {
             this->enclosingScope = enclosingScope;
             if (level == 0) {
                 define(std::make_unique<BuiltinTypeSymbol>("INTEGER"));
@@ -399,7 +399,8 @@ class SymbolTable {
             std::string name = sym->name;
             map[name] = sym;
         };
-        std::shared_ptr<Symbol> lookup(const std::string &symName, bool local=false) {
+        std::shared_ptr<Symbol> lookup(const std::string& symName, 
+            bool local=false) {
             std::shared_ptr<Symbol> result = nullptr;
             auto pair = map.find(symName);
             if (pair != map.end())
@@ -551,11 +552,11 @@ void VariableNode::print() {
 class CompoundStatement: public Node {
     public:
         std::vector<std::unique_ptr<Node>> statementList;
-        CompoundStatement(std::vector<std::unique_ptr<Node>>&& list);
+        CompoundStatement(std::vector<std::unique_ptr<Node>> list);
         void accept(Visitor *visitor) override;
         void print() override;
 };
-CompoundStatement::CompoundStatement(std::vector<std::unique_ptr<Node>>&& list) {
+CompoundStatement::CompoundStatement(std::vector<std::unique_ptr<Node>> list) {
     this->statementList = std::move(list);
 }
 void CompoundStatement::accept(Visitor *visitor) {
@@ -572,7 +573,7 @@ class ProcedureCall: public Node {
         std::vector<std::unique_ptr<Node>> args;
         std::shared_ptr<ProcedureSymbol> procSymbol;
 
-        ProcedureCall(std::shared_ptr<Token> &procedure, std::vector<std::unique_ptr<Node>> &&args) {
+        ProcedureCall(std::shared_ptr<Token> procedure, std::vector<std::unique_ptr<Node>> args) {
             this->procedure = procedure;
             this->args = std::move(args);
         }
@@ -660,7 +661,7 @@ class DeclarationRoot: public Node {
     public:
         std::vector<std::unique_ptr<Node>> declarations;
         DeclarationRoot() {}
-        DeclarationRoot(std::vector<std::unique_ptr<Node>> &declarations) {
+        DeclarationRoot(std::vector<std::unique_ptr<Node>>& declarations) {
             this->declarations = std::move(declarations);
         }
         void accept(Visitor *visitor) override {
@@ -677,8 +678,8 @@ class Block: public Node {
         std::vector<std::unique_ptr<Node>> procedures;
 
         Block( 
-            std::unique_ptr<Node> compoundStatement, std::vector<std::unique_ptr<Node>>&& procedures,
-            std::vector<std::unique_ptr<Node>>&& varDeclarations
+            std::unique_ptr<Node> compoundStatement, std::vector<std::unique_ptr<Node>> procedures,
+            std::vector<std::unique_ptr<Node>> varDeclarations
         ) {
             this->compoundStatement = std::move(compoundStatement); 
             this->procedures = std::move(procedures);
@@ -696,7 +697,7 @@ class ParamDeclaration: public Node {
     public:
         std::unique_ptr<Node> varNode;
         std::unique_ptr<Node> typeNode;
-        ParamDeclaration(std::unique_ptr<Node> &&varNode, TokenType tokenType) {
+        ParamDeclaration(std::unique_ptr<Node> varNode, TokenType tokenType) {
             this->varNode = std::move(varNode);
             this->typeNode = std::make_unique<TypeNode>(tokenType);
         }
@@ -717,7 +718,7 @@ class Procedure: public Node {
         std::unique_ptr<Node> block;
         std::vector<std::unique_ptr<Node>> paramDeclarations;
 
-        Procedure(std::shared_ptr<Token> id, std::unique_ptr<Node>&& block, std::vector<std::unique_ptr<Node>> params) {
+        Procedure(std::shared_ptr<Token> id, std::unique_ptr<Node> block, std::vector<std::unique_ptr<Node>> params) {
             this->id = id;
             this->block = std::move(block);
             this->paramDeclarations = std::move(params);
@@ -734,7 +735,8 @@ class ProgramNode: public Node {
         std::shared_ptr<Token> programName;
         std::unique_ptr<Node> block;
 
-        ProgramNode(std::shared_ptr<Token> programName, std::unique_ptr<Node> &&block) {
+        ProgramNode(std::shared_ptr<Token> programName, 
+        std::unique_ptr<Node> block) {
             this->programName = programName;
             this->block = std::move(block);
         }
@@ -764,11 +766,11 @@ class Lexer {
         std::string identifier();
     public:
         char currentChar;
-        Lexer(const std::string &aText);
+        Lexer(const std::string& aText);
         std::shared_ptr<Token> get_next_token();
     
 };
-Lexer::Lexer(const std::string &aText) {
+Lexer::Lexer(const std::string& aText) {
     text = aText;
     pos = 0;
     currentChar = text[pos];
@@ -928,12 +930,12 @@ class Parser {
         std::unique_ptr<Node> term();
         std::unique_ptr<Node> expr();
     public:
-        Parser(const std::string &aText);
+        Parser(const std::string& aText);
         ~Parser();
         void print_tokens();
         std::unique_ptr<Node> parse();
 };
-Parser::Parser(const std::string &aText) {
+Parser::Parser(const std::string& aText) {
     lexer = std::make_unique<Lexer>(aText);
     currentToken = lexer->get_next_token();
 }
@@ -1435,7 +1437,7 @@ class EvalVisitor: public Visitor {
         std::unordered_map<std::string, int> varValues;
         std::unique_ptr<CallStack> callStack = std::make_unique<CallStack>();
 
-        void error(const std::string &msg) {
+        void error(const std::string& msg) {
             std::string errormsg = "EvalVisitor error: ";
             throw std::runtime_error(errormsg +msg+ "\n");
         }
@@ -1464,7 +1466,7 @@ class EvalVisitor: public Visitor {
                 }
                 nodeValues[node] = result;
             }
-            catch (std::runtime_error &e) {
+            catch (std::runtime_error& e) {
                 std::string errormsg = "Invalid node left and right values ";
                 error(errormsg + e.what());
             }
@@ -1559,7 +1561,7 @@ class EvalVisitor: public Visitor {
 class PrintVisitor: public Visitor {
     private:
         int level;
-        void print_with_tabs(int numTabs, const std::string &msg) {
+        void print_with_tabs(int numTabs, const std::string& msg) {
             for (int i = 0; i < numTabs; ++i) {
                 std::printf("  ");
             }
@@ -1689,19 +1691,19 @@ class Interpreter {
         std::unique_ptr<Parser> parser;
         std::unordered_map<std::string, int> GLOBAL_SCOPE;
         std::unique_ptr<Node> root;
-        void error(const std::string &message);
+        void error(const std::string& message);
     public:
-        Interpreter(const std::string &aText);
+        Interpreter(const std::string& aText);
         void interpret();
         void print_postorder();
         void build_symbol_table();
         void print_global_scope();
 };
-Interpreter::Interpreter(const std::string &aText) {
+Interpreter::Interpreter(const std::string& aText) {
     parser = std::make_unique<Parser>(aText);
     root = parser->parse();
 }
-void Interpreter::error(const std::string &message) {
+void Interpreter::error(const std::string& message) {
     throw std::runtime_error(message);
 }
 void Interpreter::interpret() {
@@ -1737,7 +1739,7 @@ void print_help() {
     std::printf("\n");
 }
 
-const std::string read_file(const std::string &path) {
+const std::string read_file(const std::string& path) {
     std::ifstream file;
     file.open(path);
 

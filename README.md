@@ -4,7 +4,7 @@ This is my version of a simple PASCAL Interpreter in progress. It is a self proj
 
 I started working on this project in August 2025 and have been working on this extensively during my fall semester of my freshman year at UMD. This has been a large step up from my previous projects and it has taught me countless things about programming.  
 
-## Key Functions
+## Functionality
 - The program takes in a ```.txt``` file. Run the ```run``` executable along with the path to your input ```.txt``` file.
 - It prints out a representation of the abstract syntax tree architecture in a postorder traversal.
 - It prints out a series of symbol tables for each scope of the input program. This is during the semantic analysis phase
